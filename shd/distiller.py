@@ -623,3 +623,44 @@ class HologramCrystalLoader:
             "latency_ms": (time.perf_counter() - t0) * 1000.0,
         }
 
+    def save(self, filepath: str | None = None) -> float:
+        """Persist the (possibly self-healed) crystal back to ``.hologram.npz``.
+
+        Returns the saved file size in KB.
+        """
+        out_path = filepath or self.filepath
+        payload = dict(
+            crystal_X=self.X.astype(np.float32),
+            crystal_Y=self.y.astype(np.float32),
+            gamma_weights=self.weights.astype(np.float32),
+            passport_eigvals=self.eigvals.astype(np.float16),
+            passport_eigvecs=self.eigvecs.astype(np.float16),
+            X_mean=self.X_mean.astype(np.float32),
+            X_std=self.X_std.astype(np.float32),
+            n_seen=np.array([self.n_seen], dtype=np.int64),
+        )
+        if self.Omega is not None and self.phase is not None:
+            payload["Omega"] = self.Omega.astype(np.float32)
+            payload["phase"] = self.phase.astype(np.float32)
+        np.savez_compressed(out_path, **payload)
+        return os.path.getsize(out_path) / 1024.0
+
+    def summary(self) -> dict:
+        """Return a JSON-serializable metadata summary of the loaded crystal."""
+        size_kb = os.path.getsize(self.filepath) / 1024.0 if os.path.exists(self.filepath) else 0.0
+        return {
+            "filepath": self.filepath,
+            "file_size_kb": round(float(size_kb), 2),
+            "n_medoids": int(self.X.shape[0]),
+            "n_features": int(self.X.shape[1]),
+            "n_seen": int(self.n_seen),
+            "compression_ratio": round(float(self.n_seen) / max(len(self.X), 1), 2),
+            "sketch_dim": int(self.k_dim),
+            "passport_rank": int(len(self.eigvals)),
+            "has_projector": bool(self.Omega is not None),
+            "y_min": float(np.min(self.y)),
+            "y_median": float(np.median(self.y)),
+            "y_max": float(np.max(self.y)),
+        }
+
+

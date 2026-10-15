@@ -45,6 +45,23 @@ print(report)  # {'bw_distance': ..., 'latency_ms': ..., 'is_shifted': False}
 
 # Surgical self-healing when a new regime arrives (zero catastrophic forgetting):
 heal_info = loader.heal_domain_shift(X_drifted, y_drifted, n_inject=35)
+loader.save("my_crystal_healed.hologram.npz")
+```
+
+## CLI (`python -m shd` / `shd`)
+
+```bash
+# Inspect any .hologram.npz crystal
+python -m shd inspect artifacts/superconduct_v37.hologram.npz
+
+# Distill a CSV/NPY/NPZ stream (omit --target-col for label-free sensor mode)
+python -m shd distill --input stream.csv --target-col -1 --output crystal.hologram.npz
+
+# Run the Bures-Wasserstein OOD radar on a new batch
+python -m shd radar --crystal crystal.hologram.npz --input new_batch.csv --target-col -1
+
+# Surgically inject new Voronoi medoids on domain shift and save
+python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-col -1 --output healed.hologram.npz
 ```
 
 ## Pipeline
@@ -117,6 +134,21 @@ Headline: standard GP+EI on Random or K-Means coresets gets a median of **0 out
 of 12** pocket hits in its top-20 EI acquisitions, whereas the same GP+EI on the
 SHD crystal hits **6 out of 12** immediately and drives 10-step BO simple regret
 down to **0.099** (reaching exact 0.000 regret in 7/20 seeds).
+
+#### 3b. End-to-end Phase Boundary Rediscovery (`SHD v3.7 → NEON Lab CPD-rank`)
+
+When a composition-temperature stream ($N = 8,000$, quadrant phase transition
+$A > 0.625 \land T > 720\text{ K}$ covering $\approx 2.8\%$ of the stream) is
+compressed to $M = 120$ points and fed into NEON Lab's two-layer rank-residual
+permutation detector (`discover_phase_boundary_cpd(use_rank=True, alpha=0.01)`):
+
+| Coreset feeding CPD-rank ($M=120$) | Planted Phase Points Captured (med / IQR) | CPD-rank F1 (med / IQR) | Verified Detections ($p < 0.01 \land \text{F1} \ge 0.5$) | Boundary Error $\Delta A$ (med / IQR) | Boundary Error $\Delta T$ (med / IQR) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Random (1.5%)** | 3.0 / 1.2 | 0.038 / 0.145 | 1 / 20 (5%) | 0.200 / 0.231 | 105.0 / 157.5 K |
+| **K-Means (1.5%)** | 5.0 / 2.0 | 0.171 / 0.460 | 4 / 20 (20%) | 0.163 / 0.206 | 105.0 / 87.5 K |
+| **SHD v3.7 (1.5%)** | **10.0 / 3.0** | **1.000 / 0.000** | **18 / 20 (90%)** | **0.050 / 0.025** | **43.8 / 52.5 K** |
+| *Wilcoxon SHD vs Random* | 20/20 wins, $p=8.3\times 10^{-5}$ | 17/20 wins, $p=2.5\times 10^{-4}$ | **18/20 vs 1/20** | 17/20 wins, $p=3.3\times 10^{-4}$ | 16/20 wins, $p=1.5\times 10^{-3}$ |
+| *Wilcoxon SHD vs K-Means* | 20/20 wins, $p=8.3\times 10^{-5}$ | 15/20 wins, $p=3.6\times 10^{-3}$ | **18/20 vs 4/20** | 15/20 wins, $p=8.0\times 10^{-3}$ | 14/20 wins, $p=2.8\times 10^{-3}$ |
 
 ## Known limitations
 

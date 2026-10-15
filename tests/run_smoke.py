@@ -43,6 +43,7 @@ def main() -> int:
         "test_unsupervised_label_free_mode",
         "test_max_init_buffer_cap",
         "test_heal_domain_shift",
+        "test_loader_save_and_cli_commands",
     ]
     failures = []
     for name in test_names:

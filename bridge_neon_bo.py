@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 import time
 
 import numpy as np
@@ -43,6 +45,18 @@ from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
 
 from shd import SpectralHologramDistiller
+
+# Import NEON Lab CPD-rank detector if the sibling repository is present
+_NEON_REPO = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "pro")
+)
+if os.path.isdir(_NEON_REPO) and _NEON_REPO not in sys.path:
+    sys.path.insert(0, _NEON_REPO)
+try:
+    import jarvis_v2_cpd as neon_cpd
+except ImportError:
+    neon_cpd = None
+
 
 
 def sample_discontinuous_world(n: int, seed: int, noise_std: float = 0.08):
@@ -142,6 +156,62 @@ def run_bo_loop(
     }
 
 
+def sample_simplex_phase_stream(n: int, seed: int, a_star: float = 0.625, t_star_K: float = 720.0):
+    """Stream on the composition-temperature domain (A+B+C=1, T in [300, 1000] K)
+    with a rare quadrant phase transition (A > a_star & T > t_star_K, ~2.8% of stream).
+    """
+    rng = np.random.default_rng(seed)
+    A = rng.beta(1.5, 3.3, size=n)
+    u = rng.uniform(0.0, 1.0, size=n)
+    B = (1.0 - A) * u
+    C = 1.0 - A - B
+    T = rng.uniform(300.0, 1000.0, size=n)
+    X = np.column_stack([A, B, C, T])
+    t = T / 1000.0
+    in_phase = (A > a_star) & (T > t_star_K)
+    y_clean = (
+        0.5 * A
+        + 0.3 * B
+        - 0.2 * C
+        + 0.2 * t
+        + 1.6 * np.exp(-((A - 0.28) ** 2 / 0.08 + (t - 0.45) ** 2 / 0.10))
+        + np.where(in_phase, 2.8, 0.0)
+    )
+    y_obs = y_clean + 0.08 * rng.normal(size=n)
+    return X, y_obs, in_phase
+
+
+def run_cpd_boundary_eval(X_coreset: np.ndarray, y_coreset: np.ndarray, seed: int, a_star: float = 0.625, t_star_K: float = 720.0) -> dict:
+    """Run NEON Lab's two-layer CPD-rank discontinuity detector on a 120-point coreset."""
+    if neon_cpd is None:
+        return {}
+    truth_fn = lambda A, B, C, T: (A > a_star) & (T > t_star_K)
+    res = neon_cpd.discover_phase_boundary_cpd(
+        X_coreset,
+        y_coreset,
+        truth_fn=truth_fn,
+        truth_boundary=(a_star, t_star_K),
+        n_perm=200,
+        seed=seed,
+        n_iter=2,
+        min_f1=0.5,
+        min_anom=5,
+        alpha=0.01,
+        use_rank=True,
+    )
+    return {
+        "n_planted": int(res["n_planted"]),
+        "f1": float(res["f1"]),
+        "precision": float(res["precision"]),
+        "recall": float(res["recall"]),
+        "p_value": float(res["p_value"]),
+        "detected": bool(res["detected"]),
+        "boundary_err_A": float(res["boundary_err_A"]) if res["boundary_err_A"] is not None else 1.0,
+        "boundary_err_T_K": float(res["boundary_err_T_K"]) if res["boundary_err_T_K"] is not None else 700.0,
+    }
+
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=20)
@@ -200,14 +270,47 @@ def main():
             "random": run_bo_loop(Z_rand, y_rand, None, Z_pool, y_pool_obs, y_pool_clean, in_pocket_pool),
             "kmeans": run_bo_loop(Z_km, y_km, w_km, Z_pool, y_pool_obs, y_pool_clean, in_pocket_pool),
         }
+
+        if neon_cpd is not None:
+            X_simp, y_simp, in_simp = sample_simplex_phase_stream(8000, seed=500 + seed)
+            d_cpd = SpectralHologramDistiller(
+                crystal_size=m,
+                high_band_ratio=0.28,
+                sketch_dim=128,
+                tail_quantile=88.0,
+                phase_kappa=3.2,
+                random_state=seed,
+            )
+            for i in range(0, len(X_simp), 2000):
+                d_cpd.partial_fit(X_simp[i : i + 2000], y_simp[i : i + 2000])
+            d_cpd.finalize_crystal()
+
+            rng_c = np.random.default_rng(seed)
+            rc_idx = rng_c.choice(len(X_simp), size=m, replace=False)
+
+            Z_simp = StandardScaler().fit_transform(X_simp)
+            km_c = MiniBatchKMeans(n_clusters=m, batch_size=2048, random_state=seed, n_init=3).fit(Z_simp)
+            kmc_idx = np.argmin(cdist(km_c.cluster_centers_, Z_simp, metric="sqeuclidean"), axis=1)
+
+            rec["cpd_stream_phase_pts"] = int(np.sum(in_simp))
+            rec["shd"]["cpd"] = run_cpd_boundary_eval(d_cpd.crystal_X, d_cpd.crystal_Y, seed=seed)
+            rec["random"]["cpd"] = run_cpd_boundary_eval(X_simp[rc_idx], y_simp[rc_idx], seed=seed)
+            rec["kmeans"]["cpd"] = run_cpd_boundary_eval(X_simp[kmc_idx], y_simp[kmc_idx], seed=seed)
+
         records.append(rec)
+        cpd_msg = ""
+        if neon_cpd is not None:
+            cpd_msg = (
+                f" | CPD F1 shd={rec['shd']['cpd']['f1']:.2f} "
+                f"rand={rec['random']['cpd']['f1']:.2f} km={rec['kmeans']['cpd']['f1']:.2f}"
+            )
         print(
             f"[bridge] seed {seed:2d}: gp_rmse_peak shd={rec['shd']['gp_rmse_peak']:.2f} "
             f"rand={rec['random']['gp_rmse_peak']:.2f} km={rec['kmeans']['gp_rmse_peak']:.2f} | "
             f"EI@20 hits shd={rec['shd']['ei_hits_at_20']:2d} rand={rec['random']['ei_hits_at_20']:2d} "
             f"km={rec['kmeans']['ei_hits_at_20']:2d} | "
             f"regret10 shd={rec['shd']['bo_regret_10']:.3f} rand={rec['random']['bo_regret_10']:.3f} "
-            f"km={rec['kmeans']['bo_regret_10']:.3f} ({time.perf_counter()-ts:.1f}s)"
+            f"km={rec['kmeans']['bo_regret_10']:.3f}{cpd_msg} ({time.perf_counter()-ts:.1f}s)"
         )
 
     tests = {}
@@ -229,6 +332,35 @@ def main():
                 "p_value": float(p),
             }
 
+    if neon_cpd is not None:
+        for cpd_metric, higher_is_better in [
+            ("f1", True),
+            ("n_planted", True),
+            ("boundary_err_A", False),
+            ("boundary_err_T_K", False),
+        ]:
+            for pair in ["random", "kmeans"]:
+                a = np.array([r["shd"]["cpd"][cpd_metric] for r in records], dtype=np.float64)
+                b = np.array([r[pair]["cpd"][cpd_metric] for r in records], dtype=np.float64)
+                diff = a - b
+                stat, p = (0.0, 1.0) if np.allclose(diff, 0) else wilcoxon(a, b)
+                wins = int(np.sum(diff > 0)) if higher_is_better else int(np.sum(diff < 0))
+                tests[f"shd_vs_{pair}_cpd_{cpd_metric}"] = {
+                    "median_shd": float(np.median(a)),
+                    "iqr_shd": float(np.percentile(a, 75) - np.percentile(a, 25)),
+                    "median_" + pair: float(np.median(b)),
+                    "iqr_" + pair: float(np.percentile(b, 75) - np.percentile(b, 25)),
+                    "wins_shd": wins,
+                    "statistic": float(stat),
+                    "p_value": float(p),
+                }
+        tests["cpd_detection_rate"] = {
+            "shd_detected_count": int(sum(1 for r in records if r["shd"]["cpd"]["detected"])),
+            "random_detected_count": int(sum(1 for r in records if r["random"]["cpd"]["detected"])),
+            "kmeans_detected_count": int(sum(1 for r in records if r["kmeans"]["cpd"]["detected"])),
+            "n_seeds": int(args.seeds),
+        }
+
     out = {
         "n_seeds": args.seeds,
         "crystal_size": args.crystal_size,
@@ -243,6 +375,13 @@ def main():
         json.dump(out, f, ensure_ascii=False, indent=1)
     print(f"\nSaved -> {path} ({out['elapsed_sec']:.1f}s)")
     for k, v in tests.items():
+        if k == "cpd_detection_rate":
+            print(
+                f"  {k:34s}: shd={v['shd_detected_count']}/{v['n_seeds']} "
+                f"vs random={v['random_detected_count']}/{v['n_seeds']} "
+                f"vs kmeans={v['kmeans_detected_count']}/{v['n_seeds']}"
+            )
+            continue
         base_key = [x for x in v if x.startswith("median_") and x != "median_shd"][0]
         print(
             f"  {k:34s}: shd={v['median_shd']:.3f} (IQR {v['iqr_shd']:.3f}) "

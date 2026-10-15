@@ -19,5 +19,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 
+[project.scripts]
+shd = "shd.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["shd*"]

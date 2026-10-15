@@ -207,3 +207,56 @@ def test_heal_domain_shift(distilled):
     assert abs(np.mean(loader.weights) - 1.0) < 1e-9
     assert res_shift["bw_after"] < res_shift["bw_before"]
 
+
+def test_loader_save_and_cli_commands(distilled):
+    """loader.save() and the `shd` CLI subcommands (inspect, distill, radar, heal)
+    must round-trip crystals cleanly without pandas."""
+    import json
+    import tempfile
+    from shd.cli import main as cli_main
+
+    _, path, _, _ = distilled
+    loader = HologramCrystalLoader(path)
+    info = loader.summary()
+    assert info["n_medoids"] == 80
+    assert info["has_projector"] is True
+
+    tmp_dir = tempfile.mkdtemp(prefix="shd_cli_")
+    csv_in = os.path.join(tmp_dir, "stream.csv")
+    csv_drift = os.path.join(tmp_dir, "drift.csv")
+    cryst_out = os.path.join(tmp_dir, "cli.hologram.npz")
+    healed_out = os.path.join(tmp_dir, "healed.hologram.npz")
+
+    X, y = make_stream(n=1600, seed=21)
+    np.savetxt(csv_in, np.column_stack([X, y]), delimiter=",", header="x0,x1,x2,x3,target", comments="")
+
+    X_dr = X.copy()
+    X_dr[:, 0:2] = X_dr[:, 0:2] * 1.8 + 1.6
+    np.savetxt(csv_drift, np.column_stack([X_dr, y + 5.0]), delimiter=",")
+
+    assert cli_main([
+        "distill",
+        "--input", csv_in,
+        "--output", cryst_out,
+        "--target-col", "-1",
+        "--crystal-size", "40",
+        "--sketch-dim", "32",
+        "--batch-size", "800",
+    ]) == 0
+    assert os.path.exists(cryst_out)
+
+    assert cli_main(["inspect", cryst_out]) == 0
+    assert cli_main(["radar", "--crystal", cryst_out, "--input", csv_drift, "--target-col", "-1"]) == 0
+    assert cli_main([
+        "heal",
+        "--crystal", cryst_out,
+        "--input", csv_drift,
+        "--output", healed_out,
+        "--target-col", "-1",
+        "--n-inject", "12",
+    ]) == 0
+
+    healed_loader = HologramCrystalLoader(healed_out)
+    assert len(healed_loader.X) == 52
+
+
