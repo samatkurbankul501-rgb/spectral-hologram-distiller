@@ -398,6 +398,32 @@ class HologramCrystalLoader:
         w_sub /= np.mean(w_sub)
         return self.X[:budget_points], self.y[:budget_points], w_sub
 
+    def get_phase_peak_slice(
+        self,
+        high_band_ratio: float = 0.26,
+        y_threshold: float | None = None,
+    ):
+        """Return ``(X_peak, y_peak, w_peak)`` for rare / discontinuity regimes.
+
+        Intended for warm-starting Bayesian Optimization (e.g. JARVIS Lab GP+EI)
+        around phase transitions without fitting a cubic O(N^3) GP on the full
+        telemetry stream. If ``y_threshold`` is given, selects medoids with
+        ``y >= y_threshold``; otherwise selects the top ``high_band_ratio``
+        fraction of medoids by target value.
+        """
+        if y_threshold is not None:
+            mask = self.y >= float(y_threshold)
+            if not np.any(mask):
+                mask = np.argsort(self.y)[-max(1, int(round(len(self.y) * high_band_ratio))) :]
+        else:
+            k_top = max(1, int(round(len(self.y) * high_band_ratio)))
+            mask = np.argsort(self.y)[-k_top:]
+        X_p = self.X[mask].copy()
+        y_p = self.y[mask].copy()
+        w_p = self.weights[mask].copy()
+        w_p /= np.mean(w_p)
+        return X_p, y_p, w_p
+
     def _embed(self, X_new_stream: np.ndarray, distiller_ref) -> np.ndarray:
         if self.Omega is not None:
             Z = np.clip((X_new_stream - self.X_mean) / self.X_std, -8.0, 8.0)

@@ -82,6 +82,10 @@ def test_save_load_roundtrip(distilled):
     Xs, ys, ws = loader.get_training_data(budget_points=30)
     assert Xs.shape[0] == 30 and ws.shape[0] == 30
     assert abs(np.mean(ws) - 1.0) < 1e-9
+    Xp, yp, wp = loader.get_phase_peak_slice(high_band_ratio=0.25)
+    assert Xp.shape == (20, 4) and yp.shape == (20,)
+    assert abs(np.mean(wp) - 1.0) < 1e-9
+    assert float(np.median(yp)) > float(np.median(loader.y))
 
 
 def test_ood_radar(distilled):
