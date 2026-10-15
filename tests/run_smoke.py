@@ -28,19 +28,27 @@ def main() -> int:
 
     distilled = ts.make_distilled(TmpPathFactory())
 
-    failures = []
-    for name in [
+    no_fixture = {
+        "test_version",
+        "test_legacy_artifact_without_projector",
+        "test_unsupervised_label_free_mode",
+        "test_max_init_buffer_cap",
+    }
+    test_names = [
         "test_version",
         "test_distiller_shapes",
         "test_save_load_roundtrip",
         "test_ood_radar",
         "test_legacy_artifact_without_projector",
-    ]:
+        "test_unsupervised_label_free_mode",
+        "test_max_init_buffer_cap",
+        "test_heal_domain_shift",
+    ]
+    failures = []
+    for name in test_names:
         fn = getattr(ts, name)
         try:
-            if name == "test_version":
-                fn()
-            elif name == "test_legacy_artifact_without_projector":
+            if name in no_fixture:
                 fn()
             else:
                 fn(distilled)
@@ -50,7 +58,8 @@ def main() -> int:
             print(f"FAIL  {name}")
             traceback.print_exc()
 
-    print(f"\n{5 - len(failures)}/5 passed")
+    total = len(test_names)
+    print(f"\n{total - len(failures)}/{total} passed")
     return 1 if failures else 0
 
 

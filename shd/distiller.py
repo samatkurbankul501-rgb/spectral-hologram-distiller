@@ -62,6 +62,10 @@ class SpectralHologramDistiller:
         (default 3.2).
     random_state : int
         Seed for the projector and k-means++ seeding.
+    max_init_buffer : int
+        Hard cap on the warm-up buffer size before building the Voronoi lattice
+        (default 8192). Prevents O(N^2) memory spikes in ``cdist`` when
+        ``crystal_size`` is large, keeping initialization strictly O(1) in RAM.
     """
 
     def __init__(
@@ -73,6 +77,7 @@ class SpectralHologramDistiller:
         tail_quantile: float = 84.0,
         phase_kappa: float = 3.2,
         random_state: int = 42,
+        max_init_buffer: int = 8192,
     ):
         self.M = crystal_size
         self.M_high = int(round(crystal_size * high_band_ratio))
@@ -81,12 +86,14 @@ class SpectralHologramDistiller:
         self.beta_low = beta_low
         self.tail_q = tail_quantile
         self.kappa = phase_kappa
+        self.max_init_buffer = max(int(max_init_buffer), self.M * 2)
         self.rng = np.random.default_rng(random_state)
 
         self.n_seen = 0
         self.Psi_sum = np.zeros((self.k, self.k), dtype=np.float64)
         self.Phi_sum = None
         self._proj_initialized = False
+        self.unsupervised_mode = False
 
         self.init_Z, self.init_X, self.init_Y, self.init_U, self.init_score = [], [], [], [], []
         self.lattice_ready = False
@@ -213,27 +220,78 @@ class SpectralHologramDistiller:
 
     # --- public API -----------------------------------------------------------
 
-    def partial_fit(self, X_batch: np.ndarray, y_batch: np.ndarray):
-        """Absorb one streaming batch (X_batch: (B, d), y_batch: (B,) or (B, 1))."""
-        if y_batch.ndim == 1:
-            y_batch = y_batch[:, None]
+    def partial_fit(self, X_batch: np.ndarray, y_batch: np.ndarray | None = None):
+        """Absorb one streaming batch.
 
-        if not self._proj_initialized:
-            self._init_projector(X_batch, y_batch)
-
+        Supports both supervised streaming (``y_batch`` provided, shape ``(B,)``
+        or ``(B, 1)``) and label-free / unsupervised sensor streaming
+        (``y_batch=None``). When ``y_batch`` is ``None``, the distiller computes
+        each sample's Bochner spectral leverage score
+        ``s_i = u_i^T (Psi_hat + beta_low I)^(-1) u_i`` via Cholesky factorization
+        and uses it as a synthetic novelty response on the phase manifold
+        ``[Z || kappa * s_norm]``, preserving rare / anomalous sensor states
+        without labels.
+        """
         B = X_batch.shape[0]
-        Z_B, U_B = self._spectral_transform(X_batch)
 
-        self.Psi_sum += U_B.T @ U_B
-        self.Phi_sum += U_B.T @ y_batch
-        self.n_seen += B
+        if y_batch is None:
+            self.unsupervised_mode = True
+            if not self._proj_initialized:
+                d = X_batch.shape[1]
+                self.Phi_sum = np.zeros((self.k, 1), dtype=np.float64)
+                self.X_mean = np.mean(X_batch, axis=0)
+                self.X_std = np.std(X_batch, axis=0) + 1e-8
+                scale_d = 1.0 / np.sqrt(max(d, 1))
+                k_half = self.k // 2
+                omega_low = self.rng.normal(0, 0.75 * scale_d, size=(d, k_half))
+                omega_high = self.rng.normal(0, 2.10 * scale_d, size=(d, self.k - k_half))
+                self.Omega = np.hstack([omega_low, omega_high])
+                self.phase = self.rng.uniform(0, 2 * np.pi, size=(1, self.k))
+                Z_B, U_B = self._spectral_transform(X_batch)
+                self.Psi_sum += U_B.T @ U_B
+                self.n_seen += B
+                Psi_hat = self.Psi_sum / self.n_seen
+                I_k = np.eye(self.k, dtype=np.float64)
+                L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
+                V_B = linalg.cho_solve(L_low, U_B.T).T
+                lev = np.sum(U_B * V_B, axis=1)
+                y_batch = lev[:, None]
+                self.y_mean = float(np.mean(y_batch))
+                self.y_std = float(np.std(y_batch)) + 1e-8
+                self.Phi_sum += U_B.T @ y_batch
+                self._proj_initialized = True
+            else:
+                Z_B, U_B = self._spectral_transform(X_batch)
+                self.Psi_sum += U_B.T @ U_B
+                self.n_seen += B
+                Psi_hat = self.Psi_sum / self.n_seen
+                I_k = np.eye(self.k, dtype=np.float64)
+                L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
+                V_B = linalg.cho_solve(L_low, U_B.T).T
+                lev = np.sum(U_B * V_B, axis=1)
+                y_batch = lev[:, None]
+                self.Phi_sum += U_B.T @ y_batch
+            Phi_hat = self.Phi_sum / self.n_seen
+            W_pred = linalg.cho_solve(L_low, Phi_hat)
+        else:
+            if y_batch.ndim == 1:
+                y_batch = y_batch[:, None]
 
-        Psi_hat = self.Psi_sum / self.n_seen
-        Phi_hat = self.Phi_sum / self.n_seen
+            if not self._proj_initialized:
+                self._init_projector(X_batch, y_batch)
 
-        I_k = np.eye(self.k, dtype=np.float64)
-        L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
-        W_pred = linalg.cho_solve(L_low, Phi_hat)
+            Z_B, U_B = self._spectral_transform(X_batch)
+
+            self.Psi_sum += U_B.T @ U_B
+            self.Phi_sum += U_B.T @ y_batch
+            self.n_seen += B
+
+            Psi_hat = self.Psi_sum / self.n_seen
+            Phi_hat = self.Phi_sum / self.n_seen
+
+            I_k = np.eye(self.k, dtype=np.float64)
+            L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
+            W_pred = linalg.cho_solve(L_low, Phi_hat)
 
         residual = np.sum((y_batch - U_B @ W_pred) ** 2, axis=1)
         res_ratio = residual / (np.median(residual) + 1e-8)
@@ -246,7 +304,8 @@ class SpectralHologramDistiller:
             self.init_Y.append(y_batch)
             self.init_U.append(U_B)
             self.init_score.append(phase_score)
-            if sum(len(a) for a in self.init_Z) >= max(4500, self.M * 12):
+            target_buf = min(self.max_init_buffer, max(4500, self.M * 12))
+            if sum(len(a) for a in self.init_Z) >= target_buf:
                 self._build_phase_manifold_lattice()
             return
 
@@ -405,7 +464,7 @@ class HologramCrystalLoader:
     ):
         """Return ``(X_peak, y_peak, w_peak)`` for rare / discontinuity regimes.
 
-        Intended for warm-starting Bayesian Optimization (e.g. JARVIS Lab GP+EI)
+        Intended for warm-starting Bayesian Optimization (e.g. NEON Lab GP+EI)
         around phase transitions without fitting a cubic O(N^3) GP on the full
         telemetry stream. If ``y_threshold`` is given, selects medoids with
         ``y >= y_threshold``; otherwise selects the top ``high_band_ratio``
@@ -469,3 +528,98 @@ class HologramCrystalLoader:
             "latency_ms": latency_ms,
             "is_shifted": bw_dist > BW_ALERT_THRESHOLD,
         }
+
+    def heal_domain_shift(
+        self,
+        X_new_stream: np.ndarray,
+        y_new_stream: np.ndarray | None = None,
+        n_inject: int = 35,
+        distiller_ref=None,
+        force: bool = False,
+        random_state: int = 42,
+    ) -> dict:
+        """Surgical self-healing: inject new Voronoi medoids when OOD shift is detected.
+
+        Checks the Bures-Wasserstein radar on ``X_new_stream``. If a shift is
+        detected (or ``force=True``), selects ``n_inject`` real medoids via
+        k-means++ + Lloyd relaxation in normalized space, appends them to the
+        crystal without touching existing medoids (zero catastrophic forgetting),
+        and updates the 32-mode spectral passport in place.
+        """
+        t0 = time.perf_counter()
+        shift = self.check_domain_shift(X_new_stream, distiller_ref=distiller_ref)
+        if not shift["is_shifted"] and not force:
+            return {
+                "healed": False,
+                "n_injected": 0,
+                "bw_before": shift["bw_distance"],
+                "bw_after": shift["bw_distance"],
+                "latency_ms": (time.perf_counter() - t0) * 1000.0,
+            }
+
+        rng = np.random.default_rng(random_state)
+        Z_new = np.clip((X_new_stream - self.X_mean) / self.X_std, -8.0, 8.0)
+        U_new = self._embed(X_new_stream, distiller_ref)
+        n_total = len(Z_new)
+        n_sel = min(int(n_inject), n_total)
+
+        # k-means++ seeding in Z-space
+        first_idx = int(rng.integers(0, n_total))
+        selected = [first_idx]
+        min_sq = np.sum((Z_new - Z_new[first_idx]) ** 2, axis=1)
+        for _ in range(1, n_sel):
+            probs = min_sq / (np.sum(min_sq) + 1e-12)
+            nxt = int(rng.choice(n_total, p=probs))
+            selected.append(nxt)
+            min_sq = np.minimum(min_sq, np.sum((Z_new - Z_new[nxt]) ** 2, axis=1))
+        centers = Z_new[selected].copy()
+
+        # 4 steps of Lloyd relaxation + medoid snapping to real observations
+        for _ in range(4):
+            d_mat = cdist(Z_new, centers, metric="sqeuclidean")
+            labels = np.argmin(d_mat, axis=1)
+            for c_i in range(n_sel):
+                mask = labels == c_i
+                if np.any(mask):
+                    centers[c_i] = np.mean(Z_new[mask], axis=0)
+
+        d_final = cdist(centers, Z_new, metric="sqeuclidean")
+        med_idx = np.argmin(d_final, axis=1)
+        counts = np.bincount(labels, minlength=n_sel).astype(np.float64) + 1.0
+        w_patch = counts / np.mean(counts)
+
+        X_patch = X_new_stream[med_idx].astype(np.float64).copy()
+        if y_new_stream is not None:
+            y_patch = np.asarray(y_new_stream, dtype=np.float64).squeeze()[med_idx].copy()
+        else:
+            # Unsupervised fallback: spectral novelty score against current passport
+            proj = U_new[med_idx] @ self.eigvecs
+            y_patch = np.sum(U_new[med_idx] ** 2, axis=1) - np.sum(proj ** 2, axis=1)
+
+        self.X = np.vstack([self.X, X_patch])
+        self.y = np.concatenate([self.y, np.atleast_1d(y_patch)])
+        w_all = np.concatenate([self.weights, w_patch])
+        self.weights = w_all / np.mean(w_all)
+
+        # Blend the spectral passport with the new regime so subsequent radar
+        # checks recognize the healed domain as in-distribution.
+        Psi_new = (U_new.T @ U_new) / max(len(U_new), 1)
+        alpha_blend = min(0.50, max(0.15, len(U_new) / (self.n_seen + len(U_new))))
+        Psi_blend = (1.0 - alpha_blend) * self.Psi_passport + alpha_blend * Psi_new
+        Psi_blend = 0.5 * (Psi_blend + Psi_blend.T)
+        rank_p = len(self.eigvals)
+        eigvals, eigvecs = linalg.eigh(Psi_blend)
+        self.eigvals = eigvals[-rank_p:].astype(np.float64)
+        self.eigvecs = eigvecs[:, -rank_p:].astype(np.float64)
+        self.Psi_passport = (self.eigvecs * self.eigvals) @ self.eigvecs.T
+        self.n_seen += len(X_new_stream)
+
+        after = self.check_domain_shift(X_new_stream, distiller_ref=distiller_ref)
+        return {
+            "healed": True,
+            "n_injected": int(n_sel),
+            "bw_before": shift["bw_distance"],
+            "bw_after": after["bw_distance"],
+            "latency_ms": (time.perf_counter() - t0) * 1000.0,
+        }
+

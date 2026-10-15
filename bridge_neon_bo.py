@@ -1,4 +1,4 @@
-"""Bridge benchmark: SHD v3.7 as a streaming coreset for JARVIS Lab BO surrogates.
+"""Bridge benchmark: SHD v3.7 as a streaming coreset for NEON Lab BO surrogates.
 
 Why this bridge matters:
 - Gaussian Process (GP) surrogates in Bayesian Optimization scale as O(N^3) and
@@ -14,7 +14,7 @@ Why this bridge matters:
 Experiment (20 seeds, paired Wilcoxon):
 1. Stream N = 10,000 noisy observations from a 4D materials/reactor landscape
    with a sharp phase transition (smooth background + step-jump peak zone,
-   mirroring JARVIS Lab's HiddenWorldPhase).
+   mirroring NEON Lab's HiddenWorldPhase).
 2. Compress the stream into M = 120 points via Random, K-Means, and SHD v3.7.
 3. Fit an identical Matérn-5/2 GaussianProcessRegressor on each 120-point coreset
    (with alpha = sigma_noise^2 / gamma_weights for weighted coresets).
@@ -238,7 +238,7 @@ def main():
         "records": records,
         "wilcoxon": tests,
     }
-    path = "bridge_jarvis_bo_results.json"
+    path = "bridge_neon_bo_results.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
     print(f"\nSaved -> {path} ({out['elapsed_sec']:.1f}s)")

@@ -127,3 +127,83 @@ def test_legacy_artifact_without_projector():
             pass
         else:
             raise AssertionError("expected ValueError for legacy artifact without distiller_ref")
+
+
+def test_unsupervised_label_free_mode():
+    """partial_fit(X, y_batch=None) must capture rare sensor anomalies via Bochner
+    spectral leverage without requiring external labels."""
+    rng = np.random.default_rng(123)
+    X_norm = rng.normal(0.0, 1.0, size=(3800, 4))
+    # Inject two distinct rare anomalous sensor regimes (2.5% each = 5% total)
+    X_anom_pos = rng.normal(4.5, 0.80, size=(100, 4))
+    X_anom_neg = rng.normal(-4.5, 0.80, size=(100, 4))
+    X = np.vstack([X_norm, X_anom_pos, X_anom_neg])
+    perm = rng.permutation(len(X))
+    X = X[perm]
+
+    d = SpectralHologramDistiller(
+        crystal_size=80,
+        high_band_ratio=0.25,
+        sketch_dim=64,
+        tail_quantile=92.0,
+        max_init_buffer=2500,
+    )
+    for i in range(0, len(X), 1000):
+        d.partial_fit(X[i : i + 1000], y_batch=None)
+    rel_err = d.finalize_crystal()
+    assert d.unsupervised_mode is True
+    assert d.crystal_X.shape == (80, 4)
+    assert d.crystal_Y.shape == (80,)
+    assert rel_err < 0.65
+    # Both rare regimes (> 2.8 and < -2.8 on axis 0) must be captured, and their
+    # synthetic leverage scores in crystal_Y must exceed the background median.
+    pos_mask = d.crystal_X[:, 0] > 2.8
+    neg_mask = d.crystal_X[:, 0] < -2.8
+    anom_mask = pos_mask | neg_mask
+    anom_medoids = int(np.sum(anom_mask))
+    assert int(np.sum(pos_mask)) >= 3 and int(np.sum(neg_mask)) >= 3
+    assert anom_medoids >= 8, f"Expected >= 8 anomaly medoids, got {anom_medoids}"
+    assert float(np.median(d.crystal_Y[anom_mask])) > float(np.median(d.crystal_Y[~anom_mask]))
+
+
+def test_max_init_buffer_cap():
+    """Warm-up buffer must build lattice once max_init_buffer is reached instead
+    of accumulating M * 12 rows unboundedly."""
+    rng = np.random.default_rng(77)
+    d = SpectralHologramDistiller(
+        crystal_size=200, sketch_dim=32, max_init_buffer=600
+    )
+    assert d.max_init_buffer == 600  # M * 12 would be 2400 without the cap
+    X = rng.normal(size=(700, 3))
+    y = rng.normal(size=700)
+    d.partial_fit(X[:350], y[:350])
+    assert d.lattice_ready is False
+    d.partial_fit(X[350:700], y[350:700])
+    assert d.lattice_ready is True
+    assert d.init_X == []
+
+
+def test_heal_domain_shift(distilled):
+    """heal_domain_shift must leaves in-distribution streams untouched and
+    surgically inject medoids + lower BW distance on shifted streams."""
+    _, path, _, _ = distilled
+    loader = HologramCrystalLoader(path)
+    X_in, y_in = make_stream(n=1200, seed=55)
+    res_in = loader.heal_domain_shift(X_in, y_in, n_inject=20)
+    assert res_in["healed"] is False
+    assert res_in["n_injected"] == 0
+    assert len(loader.X) == 80
+
+    X_old_copy = loader.X.copy()
+    X_shift = X_in.copy()
+    X_shift[:, 0:2] = X_shift[:, 0:2] * 1.75 + 1.50
+    y_shift = y_in + 8.0
+    res_shift = loader.heal_domain_shift(X_shift, y_shift, n_inject=20)
+    assert res_shift["healed"] is True
+    assert res_shift["n_injected"] == 20
+    assert len(loader.X) == 100
+    # Zero catastrophic forgetting: first 80 medoids are bitwise identical
+    assert np.array_equal(loader.X[:80], X_old_copy)
+    assert abs(np.mean(loader.weights) - 1.0) < 1e-9
+    assert res_shift["bw_after"] < res_shift["bw_before"]
+
