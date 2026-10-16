@@ -79,6 +79,7 @@ def cmd_distill(args: argparse.Namespace) -> int:
         phase_kappa=args.phase_kappa,
         random_state=args.seed,
         max_init_buffer=args.max_init_buffer,
+        include_deltas=args.include_deltas,
     )
     B = max(1, int(args.batch_size))
     for i in range(0, len(X), B):
@@ -113,6 +114,7 @@ def cmd_heal(args: argparse.Namespace) -> int:
         X,
         y,
         n_inject=args.n_inject,
+        max_crystal_size=args.max_crystal_size,
         force=args.force,
         random_state=args.seed,
     )
@@ -145,6 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_dis.add_argument("--phase-kappa", type=float, default=3.2)
     p_dis.add_argument("--batch-size", type=int, default=2500)
     p_dis.add_argument("--max-init-buffer", type=int, default=8192)
+    p_dis.add_argument("--include-deltas", action="store_true", help="Augment RFF sketch with streaming first differences")
     p_dis.add_argument("--seed", type=int, default=42)
     p_dis.set_defaults(func=cmd_distill)
 
@@ -160,6 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_heal.add_argument("--output", "-o", default=None, help="Output .hologram.npz path (default: overwrite crystal)")
     p_heal.add_argument("--target-col", type=int, default=None, help="Target column index (omit for label-free)")
     p_heal.add_argument("--n-inject", type=int, default=35)
+    p_heal.add_argument("--max-crystal-size", type=int, default=None, help="Cap total crystal size by pruning low-weight background medoids")
     p_heal.add_argument("--force", action="store_true")
     p_heal.add_argument("--seed", type=int, default=42)
     p_heal.set_defaults(func=cmd_heal)

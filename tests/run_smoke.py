@@ -33,6 +33,7 @@ def main() -> int:
         "test_legacy_artifact_without_projector",
         "test_unsupervised_label_free_mode",
         "test_max_init_buffer_cap",
+        "test_include_deltas_streaming_augmentation",
     }
     test_names = [
         "test_version",
@@ -44,6 +45,9 @@ def main() -> int:
         "test_max_init_buffer_cap",
         "test_heal_domain_shift",
         "test_loader_save_and_cli_commands",
+        "test_adaptive_threshold_and_small_batch",
+        "test_heal_max_crystal_size_prunes_background",
+        "test_include_deltas_streaming_augmentation",
     ]
     failures = []
     for name in test_names:

@@ -260,3 +260,81 @@ def test_loader_save_and_cli_commands(distilled):
     assert len(healed_loader.X) == 52
 
 
+def test_adaptive_threshold_and_small_batch(distilled):
+    """check_domain_shift must expose a batch-size-calibrated threshold and not
+    raise false alarms on small in-distribution windows (adaptive_threshold=True)."""
+    _, path, _, _ = distilled
+    loader = HologramCrystalLoader(path)
+    X_in, _ = make_stream(n=2000, seed=31)
+
+    rep_small = loader.check_domain_shift(X_in[:64])
+    rep_big = loader.check_domain_shift(X_in)
+    assert rep_small["threshold"] > rep_big["threshold"] >= 0.085
+    assert rep_small["is_shifted"] is False
+    assert rep_big["is_shifted"] is False
+
+    drift = X_in.copy()
+    drift[:, 0:2] = drift[:, 0:2] * 1.75 + 1.45
+    rep_drift = loader.check_domain_shift(drift[:64])
+    assert rep_drift["is_shifted"] is True
+    assert rep_drift["bw_distance"] > rep_small["bw_distance"]
+
+
+def test_heal_max_crystal_size_prunes_background(distilled):
+    """heal_domain_shift with max_crystal_size must prune only low-weight
+    background medoids while preserving the top-26% phase-peak medoids."""
+    _, path, _, _ = distilled
+    loader = HologramCrystalLoader(path)
+    X_in, y_in = make_stream(n=1200, seed=66)
+    old_peak_idx = np.argsort(loader.y)[-int(round(0.26 * len(loader.y))):]
+    old_peak_X = loader.X[old_peak_idx].copy()
+
+    X_shift = X_in.copy()
+    X_shift[:, 0:2] = X_shift[:, 0:2] * 1.8 + 1.6
+    res = loader.heal_domain_shift(
+        X_shift, y_in + 8.0, n_inject=25, max_crystal_size=90, random_state=3
+    )
+    assert res["healed"] is True
+    assert res["n_injected"] == 25
+    # 80 old + 25 injected = 105 medoids; cap 90 -> exactly 15 pruned.
+    assert res["n_pruned"] == 15
+    assert len(loader.X) == 90
+    # All old phase-peak medoids must survive the pruning
+    kept = set(map(tuple, np.round(loader.X, 6)))
+    for row in old_peak_X:
+        assert tuple(np.round(row, 6)) in kept
+    assert abs(np.mean(loader.weights) - 1.0) < 1e-9
+    assert res["bw_after"] < res["bw_before"]
+
+
+def test_include_deltas_streaming_augmentation():
+    """include_deltas=True must keep crystal_X in original d dims while the
+    internal projector consumes the [X || dX] augmented space (2d features)."""
+    rng = np.random.default_rng(5)
+    n = 2500
+    t = np.arange(n)
+    X = np.column_stack([
+        np.sin(0.05 * t) + 0.05 * rng.normal(size=n),
+        np.cos(0.03 * t) + 0.05 * rng.normal(size=n),
+        rng.normal(0.0, 0.2, size=n),
+    ])
+    # A sharp shock transient at t=1500: feature 0 jumps by 3.0 within one step
+    X[1500:, 0] += 3.0
+
+    d = SpectralHologramDistiller(
+        crystal_size=60,
+        high_band_ratio=0.30,
+        sketch_dim=48,
+        tail_quantile=88.0,
+        include_deltas=True,
+        max_init_buffer=1200,
+    )
+    for i in range(0, n, 500):
+        d.partial_fit(X[i : i + 500], y_batch=None)
+    d.finalize_crystal()
+    assert d.crystal_X.shape == (60, 3)  # original feature space preserved
+    assert d.Omega.shape[0] == 6         # projector consumed [X || dX]
+    # The shock region (post-jump rows) must be captured by the crystal
+    assert int(np.sum(d.crystal_X[:, 0] > 1.5)) >= 3
+
+

@@ -1,0 +1,1074 @@
+{
+ "summary": {
+  "n_seeds": 20,
+  "dataset": "UCI Superconductivity",
+  "crystal_size_base": 200,
+  "n_inject": 45,
+  "elapsed_sec": 46.950883699999395,
+  "radar_false_alarms_on_domain_A": 0,
+  "radar_detections_on_domain_B": 20,
+  "bw_in_median": 0.0351274899405183,
+  "bw_in_iqr": 0.0009685281700203621,
+  "bw_ood_median": 0.6355793229802907,
+  "bw_ood_iqr": 0.013613292120248643,
+  "bw_after_heal_median": 0.4647275769942748,
+  "radar_latency_ms_median": 50.15415000025314,
+  "heal_latency_ms_median": 410.3730000001633
+ },
+ "wilcoxon": {
+  "healed_vs_pre_heal_krr_rmse_domain_A": {
+   "median_healed": 13.364006271828888,
+   "iqr_healed": 0.500583622416082,
+   "median_pre_heal": 7.318210215261478,
+   "iqr_pre_heal": 0.05330003024348606,
+   "wins": 0,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_naive_overwrite_krr_rmse_domain_A": {
+   "median_healed": 13.364006271828888,
+   "iqr_healed": 0.500583622416082,
+   "median_naive_overwrite": 20.624579159514866,
+   "iqr_naive_overwrite": 0.42458535728115976,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_pre_heal_krr_rmse_domain_A": {
+   "median_healed_bounded": 13.452114748840263,
+   "iqr_healed_bounded": 0.46740086114454726,
+   "median_pre_heal": 7.318210215261478,
+   "iqr_pre_heal": 0.05330003024348606,
+   "wins": 0,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_naive_overwrite_krr_rmse_domain_A": {
+   "median_healed_bounded": 13.452114748840263,
+   "iqr_healed_bounded": 0.46740086114454726,
+   "median_naive_overwrite": 20.624579159514866,
+   "iqr_naive_overwrite": 0.42458535728115976,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_pre_heal_krr_rmse_domain_B": {
+   "median_healed": 26.881558183270776,
+   "iqr_healed": 1.3377281843065916,
+   "median_pre_heal": 57.167778207144664,
+   "iqr_pre_heal": 0.6320834264637725,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_naive_overwrite_krr_rmse_domain_B": {
+   "median_healed": 26.881558183270776,
+   "iqr_healed": 1.3377281843065916,
+   "median_naive_overwrite": 23.828620135755727,
+   "iqr_naive_overwrite": 1.5706542963662784,
+   "wins": 0,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_pre_heal_krr_rmse_domain_B": {
+   "median_healed_bounded": 26.877485796225166,
+   "iqr_healed_bounded": 1.2316870266477764,
+   "median_pre_heal": 57.167778207144664,
+   "iqr_pre_heal": 0.6320834264637725,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_naive_overwrite_krr_rmse_domain_B": {
+   "median_healed_bounded": 26.877485796225166,
+   "iqr_healed_bounded": 1.2316870266477764,
+   "median_naive_overwrite": 23.828620135755727,
+   "iqr_naive_overwrite": 1.5706542963662784,
+   "wins": 0,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_pre_heal_krr_rmse_combined": {
+   "median_healed": 19.096838024372133,
+   "iqr_healed": 0.3075086545148622,
+   "median_pre_heal": 33.85874899968566,
+   "iqr_pre_heal": 0.3672969351899269,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_naive_overwrite_krr_rmse_combined": {
+   "median_healed": 19.096838024372133,
+   "iqr_healed": 0.3075086545148622,
+   "median_naive_overwrite": 21.58319161261028,
+   "iqr_naive_overwrite": 0.6717177669055339,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_pre_heal_krr_rmse_combined": {
+   "median_healed_bounded": 19.147677005471227,
+   "iqr_healed_bounded": 0.3364027374797338,
+   "median_pre_heal": 33.85874899968566,
+   "iqr_pre_heal": 0.3672969351899269,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_naive_overwrite_krr_rmse_combined": {
+   "median_healed_bounded": 19.147677005471227,
+   "iqr_healed_bounded": 0.3364027374797338,
+   "median_naive_overwrite": 21.58319161261028,
+   "iqr_naive_overwrite": 0.6717177669055339,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_pre_heal_gbm_rmse_domain_A": {
+   "median_healed": 24.279717077703467,
+   "iqr_healed": 1.199612443967748,
+   "median_pre_heal": 7.096056387573265,
+   "iqr_pre_heal": 0.12561259017544923,
+   "wins": 0,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_naive_overwrite_gbm_rmse_domain_A": {
+   "median_healed": 24.279717077703467,
+   "iqr_healed": 1.199612443967748,
+   "median_naive_overwrite": 50.85550590582454,
+   "iqr_naive_overwrite": 6.151852034182376,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_pre_heal_gbm_rmse_domain_A": {
+   "median_healed_bounded": 25.154360047627993,
+   "iqr_healed_bounded": 1.7482535372530705,
+   "median_pre_heal": 7.096056387573265,
+   "iqr_pre_heal": 0.12561259017544923,
+   "wins": 0,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_naive_overwrite_gbm_rmse_domain_A": {
+   "median_healed_bounded": 25.154360047627993,
+   "iqr_healed_bounded": 1.7482535372530705,
+   "median_naive_overwrite": 50.85550590582454,
+   "iqr_naive_overwrite": 6.151852034182376,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_pre_heal_gbm_rmse_domain_B": {
+   "median_healed": 19.382250550648124,
+   "iqr_healed": 1.041778093940021,
+   "median_pre_heal": 54.57483420876943,
+   "iqr_pre_heal": 1.528610659761867,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_naive_overwrite_gbm_rmse_domain_B": {
+   "median_healed": 19.382250550648124,
+   "iqr_healed": 1.041778093940021,
+   "median_naive_overwrite": 16.24474144132337,
+   "iqr_naive_overwrite": 0.2967998096336828,
+   "wins": 0,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_pre_heal_gbm_rmse_domain_B": {
+   "median_healed_bounded": 19.46826654006279,
+   "iqr_healed_bounded": 0.9025625392968379,
+   "median_pre_heal": 54.57483420876943,
+   "iqr_pre_heal": 1.528610659761867,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_naive_overwrite_gbm_rmse_domain_B": {
+   "median_healed_bounded": 19.46826654006279,
+   "iqr_healed_bounded": 0.9025625392968379,
+   "median_naive_overwrite": 16.24474144132337,
+   "iqr_naive_overwrite": 0.2967998096336828,
+   "wins": 0,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_pre_heal_gbm_rmse_combined": {
+   "median_healed": 22.90391215712936,
+   "iqr_healed": 1.0182243000509885,
+   "median_pre_heal": 32.34875297667932,
+   "iqr_pre_heal": 0.8631555283679191,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_vs_naive_overwrite_gbm_rmse_combined": {
+   "median_healed": 22.90391215712936,
+   "iqr_healed": 1.0182243000509885,
+   "median_naive_overwrite": 42.38711813670988,
+   "iqr_naive_overwrite": 4.870547290139669,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_pre_heal_gbm_rmse_combined": {
+   "median_healed_bounded": 23.39765784776621,
+   "iqr_healed_bounded": 1.3267395762750596,
+   "median_pre_heal": 32.34875297667932,
+   "iqr_pre_heal": 0.8631555283679191,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  },
+  "healed_bounded_vs_naive_overwrite_gbm_rmse_combined": {
+   "median_healed_bounded": 23.39765784776621,
+   "iqr_healed_bounded": 1.3267395762750596,
+   "median_naive_overwrite": 42.38711813670988,
+   "iqr_naive_overwrite": 4.870547290139669,
+   "wins": 20,
+   "p_value": 1.9073486328125e-06
+  }
+ },
+ "records": [
+  {
+   "seed": 0,
+   "radar_in_bw": 0.03504244759591929,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.652261748395276,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 53.43959999936487,
+   "bw_after_heal": 0.47708109365351153,
+   "heal_latency_ms": 420.8120000002964,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.27864391079758,
+    "krr_rmse_domain_B": 57.25788917159985,
+    "krr_rmse_combined": 33.902379702821925,
+    "gbm_rmse_domain_A": 7.044768671123154,
+    "gbm_rmse_domain_B": 56.4550818933142,
+    "gbm_rmse_combined": 33.408522847069975
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.392061502109343,
+    "krr_rmse_domain_B": 23.909025629585233,
+    "krr_rmse_combined": 21.65171588424887,
+    "gbm_rmse_domain_A": 52.385166131044905,
+    "gbm_rmse_domain_B": 16.98367624469911,
+    "gbm_rmse_combined": 43.697310282441286
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.696475822976797,
+    "krr_rmse_domain_B": 25.453892935569595,
+    "krr_rmse_combined": 18.54882608709362,
+    "gbm_rmse_domain_A": 23.980223462152015,
+    "gbm_rmse_domain_B": 18.838402612965734,
+    "gbm_rmse_combined": 22.36545125034944
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.679376506714398,
+    "krr_rmse_domain_B": 25.656779391802967,
+    "krr_rmse_combined": 18.635309657113392,
+    "gbm_rmse_domain_A": 24.539128550053416,
+    "gbm_rmse_domain_B": 18.890744589077684,
+    "gbm_rmse_combined": 22.77684495105576
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 1,
+   "radar_in_bw": 0.03548897779622316,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6346936981710796,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 49.81660000066768,
+   "bw_after_heal": 0.4647541393058815,
+   "heal_latency_ms": 400.7747000005111,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.309234955165056,
+    "krr_rmse_domain_B": 57.677776588649415,
+    "krr_rmse_combined": 34.14777075199203,
+    "gbm_rmse_domain_A": 7.085415196923311,
+    "gbm_rmse_domain_B": 53.95119133147749,
+    "gbm_rmse_combined": 31.977187674662545
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.018680635137756,
+    "krr_rmse_domain_B": 22.372337303841633,
+    "krr_rmse_combined": 20.848555287698456,
+    "gbm_rmse_domain_A": 46.58281639506106,
+    "gbm_rmse_domain_B": 16.337218573233557,
+    "gbm_rmse_combined": 39.026676093617304
+   },
+   "healed": {
+    "krr_rmse_domain_A": 12.670560549238868,
+    "krr_rmse_domain_B": 28.849083261232717,
+    "krr_rmse_combined": 19.719869905189057,
+    "gbm_rmse_domain_A": 24.32249129749195,
+    "gbm_rmse_domain_B": 20.914983983424303,
+    "gbm_rmse_combined": 23.220392725286853
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 12.761343405572372,
+    "krr_rmse_domain_B": 28.18783606666303,
+    "krr_rmse_combined": 19.431345310640303,
+    "gbm_rmse_domain_A": 24.183055273232398,
+    "gbm_rmse_domain_B": 20.262281885962,
+    "gbm_rmse_combined": 22.92567287959795
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 2,
+   "radar_in_bw": 0.03568299183392178,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6427558177801151,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 47.504099999969185,
+   "bw_after_heal": 0.47079482637258213,
+   "heal_latency_ms": 393.72779999939667,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.3742248126969665,
+    "krr_rmse_domain_B": 56.68811927185503,
+    "krr_rmse_combined": 33.58909782891775,
+    "gbm_rmse_domain_A": 7.307661987991302,
+    "gbm_rmse_domain_B": 53.155830089703336,
+    "gbm_rmse_combined": 31.55463589589837
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.200406836411492,
+    "krr_rmse_domain_B": 23.782004468828585,
+    "krr_rmse_combined": 21.484933965036006,
+    "gbm_rmse_domain_A": 45.19486543191323,
+    "gbm_rmse_domain_B": 16.574448493383187,
+    "gbm_rmse_combined": 37.96909101801284
+   },
+   "healed": {
+    "krr_rmse_domain_A": 12.391107760839974,
+    "krr_rmse_domain_B": 29.67073319176856,
+    "krr_rmse_combined": 20.014854867036654,
+    "gbm_rmse_domain_A": 24.195133303134774,
+    "gbm_rmse_domain_B": 20.972149674182386,
+    "gbm_rmse_combined": 23.14998562120919
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 12.56874037090315,
+    "krr_rmse_domain_B": 29.38328233715736,
+    "krr_rmse_combined": 19.943693604674127,
+    "gbm_rmse_domain_A": 25.002606149260973,
+    "gbm_rmse_domain_B": 20.916789275547302,
+    "gbm_rmse_combined": 23.69295232461974
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 3,
+   "radar_in_bw": 0.034742060128983565,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6154266532612788,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 50.81400000017311,
+   "bw_after_heal": 0.4531503828021891,
+   "heal_latency_ms": 428.87659999996686,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.380737208479293,
+    "krr_rmse_domain_B": 57.620939043111214,
+    "krr_rmse_combined": 34.12529870628186,
+    "gbm_rmse_domain_A": 7.020451202106409,
+    "gbm_rmse_domain_B": 55.37576880613883,
+    "gbm_rmse_combined": 32.78529661149824
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 21.316438208672313,
+    "krr_rmse_domain_B": 21.709590364189754,
+    "krr_rmse_combined": 21.45088506761058,
+    "gbm_rmse_domain_A": 55.88682045150586,
+    "gbm_rmse_domain_B": 16.064847316888294,
+    "gbm_rmse_combined": 46.361532185930656
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.53193654171525,
+    "krr_rmse_domain_B": 26.38118081144945,
+    "krr_rmse_combined": 18.906085259150938,
+    "gbm_rmse_domain_A": 27.745547153051422,
+    "gbm_rmse_domain_B": 19.224823984447404,
+    "gbm_rmse_combined": 25.174867149654123
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.3794750945452,
+    "krr_rmse_domain_B": 26.612493676718774,
+    "krr_rmse_combined": 18.944616300683546,
+    "gbm_rmse_domain_A": 27.678463244234283,
+    "gbm_rmse_domain_B": 19.02304590510153,
+    "gbm_rmse_combined": 25.07381856776465
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 4,
+   "radar_in_bw": 0.03557966623009347,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6196435887679143,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 61.7580000007365,
+   "bw_after_heal": 0.4539392988781671,
+   "heal_latency_ms": 420.9077999994406,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.367558571043759,
+    "krr_rmse_domain_B": 57.55231783043069,
+    "krr_rmse_combined": 34.08403223289066,
+    "gbm_rmse_domain_A": 6.935811624663249,
+    "gbm_rmse_domain_B": 55.39181120487116,
+    "gbm_rmse_combined": 32.78261688042474
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.75528636889048,
+    "krr_rmse_domain_B": 26.179503444184746,
+    "krr_rmse_combined": 22.74464978319388,
+    "gbm_rmse_domain_A": 55.99054862646664,
+    "gbm_rmse_domain_B": 16.24284167816517,
+    "gbm_rmse_combined": 46.465111134657306
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.135917197907572,
+    "krr_rmse_domain_B": 27.21254228267803,
+    "krr_rmse_combined": 19.121038203707165,
+    "gbm_rmse_domain_A": 23.632401669505764,
+    "gbm_rmse_domain_B": 17.86841845246777,
+    "gbm_rmse_combined": 21.84443273886865
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.196794241822335,
+    "krr_rmse_domain_B": 27.475039320596988,
+    "krr_rmse_combined": 19.2756803363482,
+    "gbm_rmse_domain_A": 23.142309449399317,
+    "gbm_rmse_domain_B": 17.666133768539073,
+    "gbm_rmse_combined": 21.438380744869445
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 5,
+   "radar_in_bw": 0.03415339914521607,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6282797634906434,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 45.600800000102026,
+   "bw_after_heal": 0.4595429638243128,
+   "heal_latency_ms": 437.9749999998239,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.321257206223944,
+    "krr_rmse_domain_B": 57.21167494437099,
+    "krr_rmse_combined": 33.88191002805769,
+    "gbm_rmse_domain_A": 7.093700662309152,
+    "gbm_rmse_domain_B": 55.66545662147373,
+    "gbm_rmse_combined": 32.961982061825154
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.397729617326352,
+    "krr_rmse_domain_B": 23.515646669733943,
+    "krr_rmse_combined": 21.508323892875893,
+    "gbm_rmse_domain_A": 53.185169061873424,
+    "gbm_rmse_domain_B": 16.2854114847174,
+    "gbm_rmse_combined": 44.24146206382244
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.644477213019513,
+    "krr_rmse_domain_B": 26.282532369911028,
+    "krr_rmse_combined": 18.912772689959354,
+    "gbm_rmse_domain_A": 23.74259131624474,
+    "gbm_rmse_domain_B": 20.114622778165472,
+    "gbm_rmse_combined": 22.574893707899697
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.637018922165042,
+    "krr_rmse_domain_B": 26.50145194906254,
+    "krr_rmse_combined": 19.01279925482438,
+    "gbm_rmse_domain_A": 24.22990443344724,
+    "gbm_rmse_domain_B": 19.855588722774293,
+    "gbm_rmse_combined": 22.837199353100107
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 6,
+   "radar_in_bw": 0.03460600745462826,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6363250617499154,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 50.4916999998386,
+   "bw_after_heal": 0.4661967399044106,
+   "heal_latency_ms": 419.7219999996378,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.3599106535726015,
+    "krr_rmse_domain_B": 57.350893048353505,
+    "krr_rmse_combined": 33.96733406022549,
+    "gbm_rmse_domain_A": 7.262943958656575,
+    "gbm_rmse_domain_B": 54.555746643350965,
+    "gbm_rmse_combined": 32.349959041531946
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 19.938406208787768,
+    "krr_rmse_domain_B": 23.483957351084076,
+    "krr_rmse_combined": 21.210189180141725,
+    "gbm_rmse_domain_A": 47.960228334609795,
+    "gbm_rmse_domain_B": 16.23218480078025,
+    "gbm_rmse_combined": 40.09835369988825
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.085351613068767,
+    "krr_rmse_domain_B": 27.839251799461444,
+    "krr_rmse_combined": 19.40274425073319,
+    "gbm_rmse_domain_A": 24.236942857914986,
+    "gbm_rmse_domain_B": 20.163939365456166,
+    "gbm_rmse_combined": 22.93376159466657
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.024018339225988,
+    "krr_rmse_domain_B": 27.930918696949522,
+    "krr_rmse_combined": 19.42027766867393,
+    "gbm_rmse_domain_A": 25.327548939446896,
+    "gbm_rmse_domain_B": 20.448080819441845,
+    "gbm_rmse_combined": 23.781526246004844
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 7,
+   "radar_in_bw": 0.03693875654465612,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6356768982931653,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 46.41330000049493,
+   "bw_after_heal": 0.4688330696061108,
+   "heal_latency_ms": 435.72000000040134,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.282530672754017,
+    "krr_rmse_domain_B": 58.39032203890697,
+    "krr_rmse_combined": 34.55322457616994,
+    "gbm_rmse_domain_A": 7.107840082763695,
+    "gbm_rmse_domain_B": 58.37320449222867,
+    "gbm_rmse_combined": 34.51936523344756
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.374023737330624,
+    "krr_rmse_domain_B": 25.09364256082659,
+    "krr_rmse_combined": 22.091702097538715,
+    "gbm_rmse_domain_A": 50.79832710745496,
+    "gbm_rmse_domain_B": 16.20690226047322,
+    "gbm_rmse_combined": 42.33924920316014
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.345583209728476,
+    "krr_rmse_domain_B": 25.79433467292666,
+    "krr_rmse_combined": 18.539849380781757,
+    "gbm_rmse_domain_A": 24.222994443984064,
+    "gbm_rmse_domain_B": 19.04210092471973,
+    "gbm_rmse_combined": 22.595592473098485
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.529127236483403,
+    "krr_rmse_domain_B": 25.47307536281793,
+    "krr_rmse_combined": 18.47656781591122,
+    "gbm_rmse_domain_A": 26.94741440004533,
+    "gbm_rmse_domain_B": 19.642882626153984,
+    "gbm_rmse_combined": 24.707954977686658
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 8,
+   "radar_in_bw": 0.03404762730571474,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6227245237940515,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 61.16259999998874,
+   "bw_after_heal": 0.45265312928793167,
+   "heal_latency_ms": 374.15210000017396,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.413786505027391,
+    "krr_rmse_domain_B": 56.86187625568233,
+    "krr_rmse_combined": 33.69451341055046,
+    "gbm_rmse_domain_A": 7.078401928656566,
+    "gbm_rmse_domain_B": 53.3342041639287,
+    "gbm_rmse_combined": 31.62237660033074
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.759630694239327,
+    "krr_rmse_domain_B": 22.909910609931035,
+    "krr_rmse_combined": 21.514667340971688,
+    "gbm_rmse_domain_A": 45.60805945346879,
+    "gbm_rmse_domain_B": 16.475244139910583,
+    "gbm_rmse_combined": 38.279279843247245
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.616986827812099,
+    "krr_rmse_domain_B": 25.81418396581122,
+    "krr_rmse_combined": 18.678986827694118,
+    "gbm_rmse_domain_A": 25.390823945571128,
+    "gbm_rmse_domain_B": 20.04854865929142,
+    "gbm_rmse_combined": 23.71032701047552
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.600652387490516,
+    "krr_rmse_domain_B": 26.085016979171822,
+    "krr_rmse_combined": 18.79864201254328,
+    "gbm_rmse_domain_A": 26.010120947734542,
+    "gbm_rmse_domain_B": 20.171089197913762,
+    "gbm_rmse_combined": 24.184023728555395
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 9,
+   "radar_in_bw": 0.03534843508580175,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6294930545910754,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 56.84370000017225,
+   "bw_after_heal": 0.46099779980730254,
+   "heal_latency_ms": 383.1675000001269,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.294474865642244,
+    "krr_rmse_domain_B": 58.00209881090051,
+    "krr_rmse_combined": 34.33192039786919,
+    "gbm_rmse_domain_A": 7.2394711521575985,
+    "gbm_rmse_domain_B": 56.14898028054096,
+    "gbm_rmse_combined": 33.26032036779763
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.904222240439335,
+    "krr_rmse_domain_B": 23.95306050349408,
+    "krr_rmse_combined": 21.988047156944962,
+    "gbm_rmse_domain_A": 47.426883858448896,
+    "gbm_rmse_domain_B": 16.306224235611854,
+    "gbm_rmse_combined": 39.687726036170474
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.33383868364056,
+    "krr_rmse_domain_B": 26.977632291645296,
+    "krr_rmse_combined": 19.098303121020496,
+    "gbm_rmse_domain_A": 24.13042461565171,
+    "gbm_rmse_domain_B": 19.14332736090362,
+    "gbm_rmse_combined": 22.559257879217398
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.382751132487938,
+    "krr_rmse_domain_B": 27.163598330659024,
+    "krr_rmse_combined": 19.21015818873212,
+    "gbm_rmse_domain_A": 24.637634373563763,
+    "gbm_rmse_domain_B": 19.293650453971594,
+    "gbm_rmse_combined": 22.961092046565692
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 10,
+   "radar_in_bw": 0.03464573933028379,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6306470925619283,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 72.05620000058843,
+   "bw_after_heal": 0.45942403017525474,
+   "heal_latency_ms": 419.9354000002131,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.351078759938861,
+    "krr_rmse_domain_B": 56.96256085762196,
+    "krr_rmse_combined": 33.74321614506142,
+    "gbm_rmse_domain_A": 7.614708368390454,
+    "gbm_rmse_domain_B": 54.8536725317184,
+    "gbm_rmse_combined": 32.57382695864857
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.614438566702248,
+    "krr_rmse_domain_B": 25.28411185003741,
+    "krr_rmse_combined": 22.311646267085507,
+    "gbm_rmse_domain_A": 51.17834086868432,
+    "gbm_rmse_domain_B": 16.545521152801914,
+    "gbm_rmse_combined": 42.6844449291649
+   },
+   "healed": {
+    "krr_rmse_domain_A": 12.838174114375478,
+    "krr_rmse_domain_B": 27.935197827795985,
+    "krr_rmse_combined": 19.340523617699628,
+    "gbm_rmse_domain_A": 25.347456512833492,
+    "gbm_rmse_domain_B": 19.340414294414437,
+    "gbm_rmse_combined": 23.478628875183094
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 12.882940927546043,
+    "krr_rmse_domain_B": 27.832660758331073,
+    "krr_rmse_combined": 19.30989852301969,
+    "gbm_rmse_domain_A": 26.360959256525767,
+    "gbm_rmse_domain_B": 19.69323409946371,
+    "gbm_rmse_combined": 24.30061893112463
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 11,
+   "radar_in_bw": 0.03497377727827206,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6429446424045187,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 45.83760000059556,
+   "bw_after_heal": 0.4690393842814917,
+   "heal_latency_ms": 393.5188000004928,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.349677944542706,
+    "krr_rmse_domain_B": 57.12388146991833,
+    "krr_rmse_combined": 33.83558797131363,
+    "gbm_rmse_domain_A": 6.916342412576091,
+    "gbm_rmse_domain_B": 55.84176419736806,
+    "gbm_rmse_combined": 33.038381840925695
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 21.30255396107342,
+    "krr_rmse_domain_B": 24.537159627288876,
+    "krr_rmse_combined": 22.454380698002247,
+    "gbm_rmse_domain_A": 65.76978743124543,
+    "gbm_rmse_domain_B": 15.418631220690896,
+    "gbm_rmse_combined": 54.18592464769106
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.535699572667792,
+    "krr_rmse_domain_B": 26.61039579377567,
+    "krr_rmse_combined": 19.016731139959777,
+    "gbm_rmse_domain_A": 27.193774281641268,
+    "gbm_rmse_domain_B": 19.631108205797112,
+    "gbm_rmse_combined": 24.882327152090046
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.615661862368713,
+    "krr_rmse_domain_B": 26.495621204888813,
+    "krr_rmse_combined": 18.99992904417421,
+    "gbm_rmse_domain_A": 26.160233998801225,
+    "gbm_rmse_domain_B": 19.24993046392937,
+    "gbm_rmse_combined": 24.035246443811104
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 12,
+   "radar_in_bw": 0.03499767865275797,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6275592704047404,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 46.100599999590486,
+   "bw_after_heal": 0.45729398247933134,
+   "heal_latency_ms": 402.12479999991046,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.30048317237964,
+    "krr_rmse_domain_B": 56.96592952016797,
+    "krr_rmse_combined": 33.737898084547886,
+    "gbm_rmse_domain_A": 7.097056231935996,
+    "gbm_rmse_domain_B": 54.59392177418789,
+    "gbm_rmse_combined": 32.347546911826704
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.996377080011978,
+    "krr_rmse_domain_B": 24.68057996248275,
+    "krr_rmse_combined": 22.317031375745426,
+    "gbm_rmse_domain_A": 54.543315227666106,
+    "gbm_rmse_domain_B": 16.21514926984182,
+    "gbm_rmse_combined": 45.31123931298483
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.338659105504853,
+    "krr_rmse_domain_B": 27.093190162276517,
+    "krr_rmse_combined": 19.156042056870593,
+    "gbm_rmse_domain_A": 25.083226965273443,
+    "gbm_rmse_domain_B": 20.963135682463058,
+    "gbm_rmse_combined": 23.763020767082637
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.521478365192586,
+    "krr_rmse_domain_B": 26.952150881905578,
+    "krr_rmse_combined": 19.173010086143243,
+    "gbm_rmse_domain_A": 25.306113945995012,
+    "gbm_rmse_domain_B": 20.106308415166126,
+    "gbm_rmse_combined": 23.66713388311244
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 13,
+   "radar_in_bw": 0.03592978025061859,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6354817476674162,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 45.3112000004694,
+   "bw_after_heal": 0.46172084724088414,
+   "heal_latency_ms": 364.7972999997364,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.282555624665519,
+    "krr_rmse_domain_B": 57.77500559463431,
+    "krr_rmse_combined": 34.19983843670127,
+    "gbm_rmse_domain_A": 7.163822719031334,
+    "gbm_rmse_domain_B": 54.6059117374933,
+    "gbm_rmse_combined": 32.36413666188073
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 19.40921590108167,
+    "krr_rmse_domain_B": 23.875235802682866,
+    "krr_rmse_combined": 21.033935404352817,
+    "gbm_rmse_domain_A": 39.51955923333144,
+    "gbm_rmse_domain_B": 16.371480417138915,
+    "gbm_rmse_combined": 33.49661451510519
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.805243661330298,
+    "krr_rmse_domain_B": 25.744926366110516,
+    "krr_rmse_combined": 18.73761975818833,
+    "gbm_rmse_domain_A": 25.92730376971376,
+    "gbm_rmse_domain_B": 19.431705263279557,
+    "gbm_rmse_combined": 23.91807861584707
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.968237067461148,
+    "krr_rmse_domain_B": 25.58374142953715,
+    "krr_rmse_combined": 18.742312261039146,
+    "gbm_rmse_domain_A": 28.112883150569015,
+    "gbm_rmse_domain_B": 19.705638288414843,
+    "gbm_rmse_combined": 25.567180804589437
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 14,
+   "radar_in_bw": 0.034066496741994086,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6444854501430579,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 44.09900000064226,
+   "bw_after_heal": 0.47062592977614404,
+   "heal_latency_ms": 363.09389999951236,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.298497295276321,
+    "krr_rmse_domain_B": 56.731985255385,
+    "krr_rmse_combined": 33.60335146348414,
+    "gbm_rmse_domain_A": 7.133488531240272,
+    "gbm_rmse_domain_B": 54.1166792392767,
+    "gbm_rmse_combined": 32.07913268503706
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.825575352080886,
+    "krr_rmse_domain_B": 21.222704339848658,
+    "krr_rmse_combined": 20.96140969643586,
+    "gbm_rmse_domain_A": 59.04009443279293,
+    "gbm_rmse_domain_B": 16.03245715705776,
+    "gbm_rmse_combined": 48.86972825380718
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.871315451052368,
+    "krr_rmse_domain_B": 26.21258542649774,
+    "krr_rmse_combined": 18.988545266144996,
+    "gbm_rmse_domain_A": 25.274163524048216,
+    "gbm_rmse_domain_B": 18.96685360612046,
+    "gbm_rmse_combined": 23.322365703660445
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.875760573602735,
+    "krr_rmse_domain_B": 26.400789476039964,
+    "krr_rmse_combined": 19.07910177927264,
+    "gbm_rmse_domain_A": 24.322559419848446,
+    "gbm_rmse_domain_B": 18.993686710997064,
+    "gbm_rmse_combined": 22.652269901721187
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 15,
+   "radar_in_bw": 0.03521253228511731,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6405326462927864,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 50.726700000268465,
+   "bw_after_heal": 0.4684794273000622,
+   "heal_latency_ms": 391.4041999996698,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.300833701706007,
+    "krr_rmse_domain_B": 57.21828556893517,
+    "krr_rmse_combined": 33.88279553681687,
+    "gbm_rmse_domain_A": 7.1657394190836685,
+    "gbm_rmse_domain_B": 54.29453542835934,
+    "gbm_rmse_combined": 32.18585519191816
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.807658106900803,
+    "krr_rmse_domain_B": 23.391120741030758,
+    "krr_rmse_combined": 21.72031713868284,
+    "gbm_rmse_domain_A": 50.91268470419413,
+    "gbm_rmse_domain_B": 16.246641204481566,
+    "gbm_rmse_combined": 42.434987070259616
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.139490156380663,
+    "krr_rmse_domain_B": 27.357514883704695,
+    "krr_rmse_combined": 19.192842346123193,
+    "gbm_rmse_domain_A": 24.56091837646564,
+    "gbm_rmse_domain_B": 19.179130410685808,
+    "gbm_rmse_combined": 22.874062719592146
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.271853814115609,
+    "krr_rmse_domain_B": 27.284604152398458,
+    "krr_rmse_combined": 19.217662885183017,
+    "gbm_rmse_domain_A": 25.31366283486334,
+    "gbm_rmse_domain_B": 19.06221158818756,
+    "gbm_rmse_combined": 23.377005225692443
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 16,
+   "radar_in_bw": 0.034604965734326774,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.643408222282494,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 45.8558999998786,
+   "bw_after_heal": 0.46470101468266817,
+   "heal_latency_ms": 397.47890000035113,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.313013210677906,
+    "krr_rmse_domain_B": 56.23432658806559,
+    "krr_rmse_combined": 33.31989863293943,
+    "gbm_rmse_domain_A": 7.020303167136792,
+    "gbm_rmse_domain_B": 54.110058150995556,
+    "gbm_rmse_combined": 32.05884777629995
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.591067901824434,
+    "krr_rmse_domain_B": 24.491282524385216,
+    "krr_rmse_combined": 21.994537590845006,
+    "gbm_rmse_domain_A": 48.27096005366062,
+    "gbm_rmse_domain_B": 15.82253083615018,
+    "gbm_rmse_combined": 40.28836469320343
+   },
+   "healed": {
+    "krr_rmse_domain_A": 14.11546271287236,
+    "krr_rmse_domain_B": 25.499408303701333,
+    "krr_rmse_combined": 18.77602529099688,
+    "gbm_rmse_domain_A": 24.132181674718815,
+    "gbm_rmse_domain_B": 18.564765299152395,
+    "gbm_rmse_combined": 22.39554279816867
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 14.058345192268835,
+    "krr_rmse_domain_B": 25.68464292731786,
+    "krr_rmse_combined": 18.833471882862916,
+    "gbm_rmse_domain_A": 24.36191309804347,
+    "gbm_rmse_domain_B": 18.678185614085972,
+    "gbm_rmse_combined": 22.590925755534307
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 17,
+   "radar_in_bw": 0.035678339435280655,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6327043681571548,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 46.5756000003239,
+   "bw_after_heal": 0.4638329500072266,
+   "heal_latency_ms": 459.9895999999717,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.3151632242990114,
+    "krr_rmse_domain_B": 56.14116980780704,
+    "krr_rmse_combined": 33.26677002045177,
+    "gbm_rmse_domain_A": 6.949074135251504,
+    "gbm_rmse_domain_B": 52.877639616649525,
+    "gbm_rmse_combined": 31.341567395367314
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.7828412522493,
+    "krr_rmse_domain_B": 24.65578666294197,
+    "krr_rmse_combined": 22.175329727720637,
+    "gbm_rmse_domain_A": 52.07560288577809,
+    "gbm_rmse_domain_B": 17.465572484968945,
+    "gbm_rmse_combined": 43.51726726669874
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.512333476405075,
+    "krr_rmse_domain_B": 26.79846944613241,
+    "krr_rmse_combined": 19.09537292772377,
+    "gbm_rmse_domain_A": 23.078720045754846,
+    "gbm_rmse_domain_B": 18.405827892360396,
+    "gbm_rmse_combined": 21.604021979212813
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.56556755701723,
+    "krr_rmse_domain_B": 26.802820710544754,
+    "krr_rmse_combined": 19.12234392479921,
+    "gbm_rmse_domain_A": 23.880598623901424,
+    "gbm_rmse_domain_B": 18.555646270838437,
+    "gbm_rmse_combined": 22.214229218962448
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 18,
+   "radar_in_bw": 0.03611935798501328,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6398823713463915,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 52.47849999977916,
+   "bw_after_heal": 0.4678065818244224,
+   "heal_latency_ms": 418.62120000041614,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.325591907736294,
+    "krr_rmse_domain_B": 56.98587452485806,
+    "krr_rmse_combined": 33.75293657358204,
+    "gbm_rmse_domain_A": 7.095056543210533,
+    "gbm_rmse_domain_B": 53.872873602607264,
+    "gbm_rmse_combined": 31.933686758860567
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.593949222095887,
+    "krr_rmse_domain_B": 22.914323056489827,
+    "krr_rmse_combined": 21.4109097498829,
+    "gbm_rmse_domain_A": 47.21076270121018,
+    "gbm_rmse_domain_B": 16.112546278634767,
+    "gbm_rmse_combined": 39.49025823538205
+   },
+   "healed": {
+    "krr_rmse_domain_A": 12.694846080034473,
+    "krr_rmse_domain_B": 27.73030833141672,
+    "krr_rmse_combined": 19.17715778012865,
+    "gbm_rmse_domain_A": 22.735116242355264,
+    "gbm_rmse_domain_B": 19.79975995350124,
+    "gbm_rmse_combined": 21.78176693954431
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 12.785671236141336,
+    "krr_rmse_domain_B": 27.789015552091847,
+    "krr_rmse_combined": 19.245750466161432,
+    "gbm_rmse_domain_A": 23.055013892226086,
+    "gbm_rmse_domain_B": 19.823384148174817,
+    "gbm_rmse_combined": 22.009829071993277
+   },
+   "n_pruned_bounded": 25
+  },
+  {
+   "seed": 19,
+   "radar_in_bw": 0.03543035041543847,
+   "radar_in_shifted": false,
+   "radar_ood_bw": 0.6539554726077056,
+   "radar_ood_shifted": true,
+   "radar_ood_latency_ms": 54.42140000013751,
+   "bw_after_heal": 0.4782526814639057,
+   "heal_latency_ms": 435.5685000000449,
+   "pre_heal": {
+    "krr_rmse_domain_A": 7.332761153153983,
+    "krr_rmse_domain_B": 56.99613464028225,
+    "krr_rmse_combined": 33.75985212553353,
+    "gbm_rmse_domain_A": 7.14974996386281,
+    "gbm_rmse_domain_B": 53.22464227288522,
+    "gbm_rmse_combined": 31.570181295635848
+   },
+   "naive_overwrite": {
+    "krr_rmse_domain_A": 20.63471975232748,
+    "krr_rmse_domain_B": 23.023441767617886,
+    "krr_rmse_combined": 21.47651009258352,
+    "gbm_rmse_domain_A": 48.490842384841855,
+    "gbm_rmse_domain_B": 16.02300198937641,
+    "gbm_rmse_combined": 40.48909095799475
+   },
+   "healed": {
+    "krr_rmse_domain_A": 13.382429333929299,
+    "krr_rmse_domain_B": 26.964646920409145,
+    "krr_rmse_combined": 19.114496614167205,
+    "gbm_rmse_domain_A": 24.43076597717572,
+    "gbm_rmse_domain_B": 19.42408680688181,
+    "gbm_rmse_combined": 22.852309880444295
+   },
+   "healed_bounded": {
+    "krr_rmse_domain_A": 13.340822575063468,
+    "krr_rmse_domain_B": 27.145232928903653,
+    "krr_rmse_combined": 19.182062783712713,
+    "gbm_rmse_domain_A": 25.337336013767818,
+    "gbm_rmse_domain_B": 19.150086618237616,
+    "gbm_rmse_combined": 23.418310469839984
+   },
+   "n_pruned_bounded": 25
+  }
+ ]
+}

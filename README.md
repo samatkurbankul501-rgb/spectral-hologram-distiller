@@ -56,12 +56,16 @@ python -m shd inspect artifacts/superconduct_v37.hologram.npz
 
 # Distill a CSV/NPY/NPZ stream (omit --target-col for label-free sensor mode)
 python -m shd distill --input stream.csv --target-col -1 --output crystal.hologram.npz
+# ...or make the crystal sensitive to rate-of-change transients:
+python -m shd distill --input sensors.csv --target-col -1 --include-deltas --output crystal.hologram.npz
 
 # Run the Bures-Wasserstein OOD radar on a new batch
 python -m shd radar --crystal crystal.hologram.npz --input new_batch.csv --target-col -1
 
 # Surgically inject new Voronoi medoids on domain shift and save
 python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-col -1 --output healed.hologram.npz
+# ...with a hard cap on total crystal size (prunes low-weight background only):
+python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-col -1 --output healed.hologram.npz --max-crystal-size 220
 ```
 
 ## Pipeline
@@ -80,9 +84,30 @@ python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-c
 4. **Kernel-herding weights (FISTA):** `Σ γᵢuᵢuᵢᵀ ≈ Ψ̂`; Voronoi mass prior,
    root-tempered `p^0.55`.
 5. **Passport + OOD radar + Self-Healing:** top-32 eigenpairs of `Ψ̂` in float16 →
-   Bures-Wasserstein distance on a 32-dim subspace (alert threshold 0.085), plus
+   Bures-Wasserstein distance on a 32-dim subspace (base threshold 0.085,
+   auto-calibrated to batch size — see below), plus
    `loader.heal_domain_shift(...)` to surgically inject new Voronoi medoids and
    blend the spectral passport without touching old medoids.
+
+## Industrial hardening (v3.7.1)
+
+- **Adaptive BW threshold.** The radar threshold scales as
+  `T(B) = 0.085 · max(1, sqrt(1024/B))` for batch size `B`: small sensor windows
+  get a wider gate so sampling noise alone cannot trigger false alarms, while
+  `B ≥ 1024` uses the classic `0.085`. `check_domain_shift(..., adaptive_threshold=True)`
+  (default) returns the used `threshold` inside the report. Calibrated on the
+  UCI Superconductivity heal benchmark (0/20 false alarms on in-distribution
+  windows of 64 rows, 20/20 detections on true OOD windows).
+- **Bounded crystals.** `heal_domain_shift(..., max_crystal_size=220)` prunes
+  only low-weight *background* medoids when the cap is exceeded; the top-26%
+  phase-peak band and every newly injected medoid are always protected, and the
+  pruned spectral mass is transferred to the nearest surviving medoids.
+- **Streaming deltas.** `SpectralHologramDistiller(include_deltas=True)` augments
+  the internal RFF sketch and Voronoi lattice with first differences
+  `[X_t ‖ ΔX_t]` (storing only the previous batch's last row, O(d) memory), so
+  the crystal becomes sensitive to rate-of-change transients in industrial
+  telemetry. `crystal_X` and `get_training_data()` stay in the original
+  `d`-dimensional feature space — downstream models are unaffected.
 
 ## Multi-seed benchmark results (20 seeds, paired Wilcoxon)
 
@@ -150,6 +175,31 @@ permutation detector (`discover_phase_boundary_cpd(use_rank=True, alpha=0.01)`):
 | *Wilcoxon SHD vs Random* | 20/20 wins, $p=8.3\times 10^{-5}$ | 17/20 wins, $p=2.5\times 10^{-4}$ | **18/20 vs 1/20** | 17/20 wins, $p=3.3\times 10^{-4}$ | 16/20 wins, $p=1.5\times 10^{-3}$ |
 | *Wilcoxon SHD vs K-Means* | 20/20 wins, $p=8.3\times 10^{-5}$ | 15/20 wins, $p=3.6\times 10^{-3}$ | **18/20 vs 4/20** | 15/20 wins, $p=8.0\times 10^{-3}$ | 14/20 wins, $p=2.8\times 10^{-3}$ |
 
+### 4. Self-healing under a real physical domain shift (`bench_heal_superconduct.py`)
+
+UCI Superconductivity split by physics, not at random: **Domain A** = $T_c < 40$ K
+(train 11,229 / test 2,808), **Domain B** = $T_c \ge 40$ K cuprates
+(train 5,780 / test 1,446). A crystal of $M = 200$ is built on Domain A, the radar
+watches Domain B arrive, and heal injects 35 cuprate medoids. Single source of
+truth: `bench_heal_superconduct_results.json` (20 seeds, paired Wilcoxon).
+
+| Check | Result (median over 20 seeds) | Verdict |
+| :--- | :--- | :--- |
+| False alarms on in-distribution Domain A | BW = 0.035 vs threshold 0.085 | **0/20** |
+| OOD detections on Domain B (cuprates) | BW = 0.636 | **20/20** |
+| Post-heal BW on Domain B | 0.465 | radar accepts healed domain |
+| KRR RMSE on new Domain B | **26.88 K** healed vs **57.17 K** pre-heal | 20/20, $p=1.9\times10^{-6}$ |
+| GBM RMSE on new Domain B | **19.38 K** vs **54.57 K** | 20/20, $p=1.9\times10^{-6}$ |
+| Old Domain A retention vs naive overwrite | KRR **13.36 K** vs **20.62 K** | 20/20, $p=1.9\times10^{-6}$ |
+| Combined A+B vs pre-heal / naive overwrite | **19.10 K** vs 33.86 / 21.58 | 20/20 both |
+| Bounded heal (`max_crystal_size=220`) | combined **19.15 K** vs 33.86 | 20/20 — size control costs ≈ nothing |
+
+Headline: on a physically meaningful shift (low-$T_c$ iron-based → cuprate
+superconductors) the naive response is either blindness (RMSE 57 K) or catastrophic
+forgetting (old domain degrades 13.4 → 20.6 K). Surgical heal captures the new
+domain *and* keeps the old one — with a hard cap on crystal size for production
+memory budgets.
+
 ## Known limitations
 
 - **Deliberate background trade-off:** reserving 26% of medoid cells for the
@@ -159,5 +209,7 @@ permutation detector (`discover_phase_boundary_cpd(use_rank=True, alpha=0.01)`):
 - **Legacy artifact:** `artifacts/superconduct_v37.hologram.npz` predates the
   stored projector; its OOD radar requires `check_domain_shift(X, distiller_ref=...)`.
   Crystals saved by `save_hologram(include_projector=True)` are self-contained.
-- **OOD threshold:** `BW_ALERT_THRESHOLD = 0.085` is a sensible default, not a
-  distribution-free constant.
+- **OOD threshold:** the base `BW_ALERT_THRESHOLD = 0.085` (auto-widened for
+  small batches as `0.085·sqrt(1024/B)`) is calibrated on the superconductivity
+  heal benchmark, not a distribution-free constant. For a new domain, re-check
+  the radar's in-distribution false-alarm rate on your own data.

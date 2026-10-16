@@ -66,6 +66,13 @@ class SpectralHologramDistiller:
         Hard cap on the warm-up buffer size before building the Voronoi lattice
         (default 8192). Prevents O(N^2) memory spikes in ``cdist`` when
         ``crystal_size`` is large, keeping initialization strictly O(1) in RAM.
+    include_deltas : bool
+        When ``True``, augments the internal RFF sketch and Voronoi phase
+        manifold with streaming first differences ``dX_t = X_t - X_{t-1}``
+        while storing only the last row of the previous batch (O(d) memory).
+        Makes the crystal sensitive to rapid rate-of-change transients in
+        industrial sensor telemetry while keeping ``crystal_X`` in the original
+        ``d``-dimensional feature space.
     """
 
     def __init__(
@@ -78,6 +85,7 @@ class SpectralHologramDistiller:
         phase_kappa: float = 3.2,
         random_state: int = 42,
         max_init_buffer: int = 8192,
+        include_deltas: bool = False,
     ):
         self.M = crystal_size
         self.M_high = int(round(crystal_size * high_band_ratio))
@@ -87,6 +95,7 @@ class SpectralHologramDistiller:
         self.tail_q = tail_quantile
         self.kappa = phase_kappa
         self.max_init_buffer = max(int(max_init_buffer), self.M * 2)
+        self.include_deltas = bool(include_deltas)
         self.rng = np.random.default_rng(random_state)
 
         self.n_seen = 0
@@ -94,6 +103,7 @@ class SpectralHologramDistiller:
         self.Phi_sum = None
         self._proj_initialized = False
         self.unsupervised_mode = False
+        self._prev_X_row = None
 
         self.init_Z, self.init_X, self.init_Y, self.init_U, self.init_score = [], [], [], [], []
         self.lattice_ready = False
@@ -129,16 +139,29 @@ class SpectralHologramDistiller:
         self.phase = self.rng.uniform(0, 2 * np.pi, size=(1, self.k))
         self._proj_initialized = True
 
-    def _normalize_X(self, X_batch: np.ndarray) -> np.ndarray:
-        return np.clip((X_batch - self.X_mean) / self.X_std, -8.0, 8.0)
+    def _augment_deltas(self, X_batch: np.ndarray, update_state: bool = False) -> np.ndarray:
+        if not self.include_deltas:
+            return X_batch
+        dX = np.zeros_like(X_batch, dtype=np.float64)
+        if len(X_batch) > 1:
+            dX[1:] = X_batch[1:] - X_batch[:-1]
+        if self._prev_X_row is not None and len(X_batch) > 0:
+            dX[0] = X_batch[0] - self._prev_X_row
+        if update_state and len(X_batch) > 0:
+            self._prev_X_row = X_batch[-1].copy()
+        return np.hstack([X_batch, dX])
+
+    def _normalize_X(self, X_batch: np.ndarray, update_state: bool = False) -> np.ndarray:
+        X_eff = self._augment_deltas(X_batch, update_state=update_state)
+        return np.clip((X_eff - self.X_mean) / self.X_std, -8.0, 8.0)
 
     def _make_phase_coords(self, Z_batch: np.ndarray, y_batch: np.ndarray) -> np.ndarray:
         """Coordinates on the phase manifold (Z || kappa * y_norm)."""
         y_scaled = self.kappa * ((y_batch - self.y_mean) / self.y_std)
         return np.hstack([Z_batch, y_scaled])
 
-    def _spectral_transform(self, X_batch: np.ndarray) -> tuple:
-        Z = self._normalize_X(X_batch)
+    def _spectral_transform(self, X_batch: np.ndarray, update_state: bool = False) -> tuple:
+        Z = self._normalize_X(X_batch, update_state=update_state)
         U = np.sqrt(2.0 / self.k) * np.cos(Z @ self.Omega + self.phase)
         norms = np.linalg.norm(U, axis=1, keepdims=True) + 1e-8
         return Z, U / norms
@@ -192,6 +215,7 @@ class SpectralHologramDistiller:
         labels = np.argmin(d_mat, axis=1)
         counts = np.zeros(M_total, dtype=np.float64)
         med_X = np.zeros((M_total, X_all.shape[1]), dtype=np.float64)
+        med_Z = np.zeros((M_total, Z_all.shape[1]), dtype=np.float64)
         med_Y = np.zeros((M_total, Y_all.shape[1]), dtype=np.float64)
         med_U = np.zeros((M_total, U_all.shape[1]), dtype=np.float64)
 
@@ -207,11 +231,13 @@ class SpectralHologramDistiller:
                 idx_global = int(np.argmin(d_mat[:, c_i]))
 
             med_X[c_i] = X_all[idx_global]
+            med_Z[c_i] = Z_all[idx_global]
             med_Y[c_i] = Y_all[idx_global]
             med_U[c_i] = U_all[idx_global]
 
         self.centers_ZY = centers_ZY
         self.med_X = med_X
+        self.med_Z = med_Z
         self.med_Y = med_Y
         self.med_U = med_U
         self.counts = counts
@@ -237,17 +263,18 @@ class SpectralHologramDistiller:
         if y_batch is None:
             self.unsupervised_mode = True
             if not self._proj_initialized:
-                d = X_batch.shape[1]
+                X_eff0 = self._augment_deltas(X_batch, update_state=False)
+                d = X_eff0.shape[1]
                 self.Phi_sum = np.zeros((self.k, 1), dtype=np.float64)
-                self.X_mean = np.mean(X_batch, axis=0)
-                self.X_std = np.std(X_batch, axis=0) + 1e-8
+                self.X_mean = np.mean(X_eff0, axis=0)
+                self.X_std = np.std(X_eff0, axis=0) + 1e-8
                 scale_d = 1.0 / np.sqrt(max(d, 1))
                 k_half = self.k // 2
                 omega_low = self.rng.normal(0, 0.75 * scale_d, size=(d, k_half))
                 omega_high = self.rng.normal(0, 2.10 * scale_d, size=(d, self.k - k_half))
                 self.Omega = np.hstack([omega_low, omega_high])
                 self.phase = self.rng.uniform(0, 2 * np.pi, size=(1, self.k))
-                Z_B, U_B = self._spectral_transform(X_batch)
+                Z_B, U_B = self._spectral_transform(X_batch, update_state=True)
                 self.Psi_sum += U_B.T @ U_B
                 self.n_seen += B
                 Psi_hat = self.Psi_sum / self.n_seen
@@ -261,7 +288,7 @@ class SpectralHologramDistiller:
                 self.Phi_sum += U_B.T @ y_batch
                 self._proj_initialized = True
             else:
-                Z_B, U_B = self._spectral_transform(X_batch)
+                Z_B, U_B = self._spectral_transform(X_batch, update_state=True)
                 self.Psi_sum += U_B.T @ U_B
                 self.n_seen += B
                 Psi_hat = self.Psi_sum / self.n_seen
@@ -278,9 +305,10 @@ class SpectralHologramDistiller:
                 y_batch = y_batch[:, None]
 
             if not self._proj_initialized:
-                self._init_projector(X_batch, y_batch)
+                X_eff0 = self._augment_deltas(X_batch, update_state=False)
+                self._init_projector(X_eff0, y_batch)
 
-            Z_B, U_B = self._spectral_transform(X_batch)
+            Z_B, U_B = self._spectral_transform(X_batch, update_state=True)
 
             self.Psi_sum += U_B.T @ U_B
             self.Phi_sum += U_B.T @ y_batch
@@ -313,7 +341,7 @@ class SpectralHologramDistiller:
         ZY_B = self._make_phase_coords(Z_B, y_batch)
         dists = cdist(ZY_B, self.centers_ZY, metric="sqeuclidean")
         assign = np.argmin(dists, axis=1)
-        med_ZY = self._make_phase_coords(self._normalize_X(self.med_X), self.med_Y)
+        med_ZY = self._make_phase_coords(self.med_Z, self.med_Y)
 
         for c_id in np.unique(assign):
             mask = assign == c_id
@@ -332,6 +360,7 @@ class SpectralHologramDistiller:
             if float(d_cand[best_local]) <= curr_dist:
                 idx_global = np.where(mask)[0][best_local]
                 self.med_X[c_id] = X_batch[idx_global]
+                self.med_Z[c_id] = Z_B[idx_global]
                 self.med_Y[c_id] = y_batch[idx_global]
                 self.med_U[c_id] = U_B[idx_global]
 
@@ -483,9 +512,19 @@ class HologramCrystalLoader:
         w_p /= np.mean(w_p)
         return X_p, y_p, w_p
 
+    def _normalize_stream(self, X_new_stream: np.ndarray) -> np.ndarray:
+        if len(self.X_mean) == 2 * X_new_stream.shape[1]:
+            dX = np.zeros_like(X_new_stream, dtype=np.float64)
+            if len(X_new_stream) > 1:
+                dX[1:] = X_new_stream[1:] - X_new_stream[:-1]
+            X_eff = np.hstack([X_new_stream, dX])
+        else:
+            X_eff = X_new_stream
+        return np.clip((X_eff - self.X_mean) / self.X_std, -8.0, 8.0)
+
     def _embed(self, X_new_stream: np.ndarray, distiller_ref) -> np.ndarray:
         if self.Omega is not None:
-            Z = np.clip((X_new_stream - self.X_mean) / self.X_std, -8.0, 8.0)
+            Z = self._normalize_stream(X_new_stream)
             U = np.sqrt(2.0 / self.k_dim) * np.cos(Z @ self.Omega + self.phase)
             norms = np.linalg.norm(U, axis=1, keepdims=True) + 1e-8
             return U / norms
@@ -498,13 +537,31 @@ class HologramCrystalLoader:
         t = distiller_ref._spectral_transform(X_new_stream)
         return t[1] if isinstance(t, tuple) else t
 
-    def check_domain_shift(self, X_new_stream: np.ndarray, distiller_ref=None) -> dict:
+    def _calibrated_threshold(self, n_batch: int, adaptive_threshold: bool = True) -> float:
+        if not adaptive_threshold:
+            return float(BW_ALERT_THRESHOLD)
+        # Finite-sample covariance fluctuation scales as 1 / sqrt(B). For batches
+        # smaller than 1024 rows, widen the threshold smoothly so small sensor
+        # windows do not trigger false alarms from sampling noise alone. The
+        # constant 1024 was calibrated on the UCI Superconductivity heal
+        # benchmark: in-distribution windows of B=64 stay below the widened
+        # threshold while true OOD windows (BW ~0.44+) are still detected.
+        b_eff = max(int(n_batch), 16)
+        sample_scale = max(1.0, float(np.sqrt(1024.0 / b_eff)))
+        return float(BW_ALERT_THRESHOLD * sample_scale)
+
+    def check_domain_shift(
+        self,
+        X_new_stream: np.ndarray,
+        distiller_ref=None,
+        adaptive_threshold: bool = True,
+    ) -> dict:
         """Compare a new data stream against the spectral passport.
 
         Projects the new stream's RFF spectrum onto the 32-dim eigen-subspace of
         the passport and computes a Bures-Wasserstein distance (32x32 matrices
-        instead of 256x256). Returns ``bw_distance``, ``latency_ms`` and
-        ``is_shifted`` (threshold 0.085 by default).
+        instead of 256x256). Returns ``bw_distance``, ``threshold``,
+        ``latency_ms`` and ``is_shifted``.
         """
         t0 = time.perf_counter()
         U_new = self._embed(X_new_stream, distiller_ref)
@@ -521,12 +578,14 @@ class HologramCrystalLoader:
         eig_inner = np.maximum(linalg.eigvalsh(inner), 0.0)
 
         bw_dist = float(np.sqrt(max(0.0, np.trace(A_sub) + np.trace(B_sub) - 2.0 * np.sum(np.sqrt(eig_inner)))))
+        thr = self._calibrated_threshold(len(X_new_stream), adaptive_threshold=adaptive_threshold)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "bw_distance": bw_dist,
+            "threshold": thr,
             "latency_ms": latency_ms,
-            "is_shifted": bw_dist > BW_ALERT_THRESHOLD,
+            "is_shifted": bw_dist > thr,
         }
 
     def heal_domain_shift(
@@ -534,6 +593,7 @@ class HologramCrystalLoader:
         X_new_stream: np.ndarray,
         y_new_stream: np.ndarray | None = None,
         n_inject: int = 35,
+        max_crystal_size: int | None = None,
         distiller_ref=None,
         force: bool = False,
         random_state: int = 42,
@@ -544,7 +604,10 @@ class HologramCrystalLoader:
         detected (or ``force=True``), selects ``n_inject`` real medoids via
         k-means++ + Lloyd relaxation in normalized space, appends them to the
         crystal without touching existing medoids (zero catastrophic forgetting),
-        and updates the 32-mode spectral passport in place.
+        and updates the 32-mode spectral passport in place. If
+        ``max_crystal_size`` is set and exceeded, prunes only low-weight
+        background medoids while protecting the phase-peak band and newly
+        injected medoids.
         """
         t0 = time.perf_counter()
         shift = self.check_domain_shift(X_new_stream, distiller_ref=distiller_ref)
@@ -552,13 +615,14 @@ class HologramCrystalLoader:
             return {
                 "healed": False,
                 "n_injected": 0,
+                "n_pruned": 0,
                 "bw_before": shift["bw_distance"],
                 "bw_after": shift["bw_distance"],
                 "latency_ms": (time.perf_counter() - t0) * 1000.0,
             }
 
         rng = np.random.default_rng(random_state)
-        Z_new = np.clip((X_new_stream - self.X_mean) / self.X_std, -8.0, 8.0)
+        Z_new = self._normalize_stream(X_new_stream)
         U_new = self._embed(X_new_stream, distiller_ref)
         n_total = len(Z_new)
         n_sel = min(int(n_inject), n_total)
@@ -596,10 +660,39 @@ class HologramCrystalLoader:
             proj = U_new[med_idx] @ self.eigvecs
             y_patch = np.sum(U_new[med_idx] ** 2, axis=1) - np.sum(proj ** 2, axis=1)
 
+        n_old = len(self.X)
         self.X = np.vstack([self.X, X_patch])
         self.y = np.concatenate([self.y, np.atleast_1d(y_patch)])
         w_all = np.concatenate([self.weights, w_patch])
         self.weights = w_all / np.mean(w_all)
+
+        n_pruned = 0
+        if max_crystal_size is not None and len(self.X) > int(max_crystal_size):
+            cap = max(int(max_crystal_size), n_sel + 4)
+            excess = len(self.X) - cap
+            if excess > 0:
+                # Protect top 26% phase-peak medoids among old medoids + all new medoids
+                n_protect_old = max(1, int(round(0.26 * n_old)))
+                peak_old_idx = np.argsort(self.y[:n_old])[-n_protect_old:]
+                protected = np.zeros(len(self.X), dtype=bool)
+                protected[peak_old_idx] = True
+                protected[n_old:] = True
+                prunable_idx = np.where(~protected)[0]
+                if len(prunable_idx) > 0:
+                    n_drop = min(excess, len(prunable_idx))
+                    drop_order = prunable_idx[np.argsort(self.weights[prunable_idx])[:n_drop]]
+                    keep_mask = np.ones(len(self.X), dtype=bool)
+                    keep_mask[drop_order] = False
+                    # Reassign dropped weights to nearest kept medoids
+                    X_drop = self.X[drop_order]
+                    w_drop = self.weights[drop_order]
+                    self.X = self.X[keep_mask]
+                    self.y = self.y[keep_mask]
+                    self.weights = self.weights[keep_mask]
+                    nearest = np.argmin(cdist(X_drop, self.X, metric="sqeuclidean"), axis=1)
+                    np.add.at(self.weights, nearest, w_drop)
+                    self.weights /= np.mean(self.weights)
+                    n_pruned = int(n_drop)
 
         # Blend the spectral passport with the new regime so subsequent radar
         # checks recognize the healed domain as in-distribution.
@@ -618,6 +711,7 @@ class HologramCrystalLoader:
         return {
             "healed": True,
             "n_injected": int(n_sel),
+            "n_pruned": int(n_pruned),
             "bw_before": shift["bw_distance"],
             "bw_after": after["bw_distance"],
             "latency_ms": (time.perf_counter() - t0) * 1000.0,
