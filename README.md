@@ -180,7 +180,7 @@ permutation detector (`discover_phase_boundary_cpd(use_rank=True, alpha=0.01)`):
 UCI Superconductivity split by physics, not at random: **Domain A** = $T_c < 40$ K
 (train 11,229 / test 2,808), **Domain B** = $T_c \ge 40$ K cuprates
 (train 5,780 / test 1,446). A crystal of $M = 200$ is built on Domain A, the radar
-watches Domain B arrive, and heal injects 35 cuprate medoids. Single source of
+watches Domain B arrive, and heal injects 45 cuprate medoids. Single source of
 truth: `bench_heal_superconduct_results.json` (20 seeds, paired Wilcoxon).
 
 | Check | Result (median over 20 seeds) | Verdict |
