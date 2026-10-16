@@ -107,7 +107,10 @@ python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-c
   `[X_t ‖ ΔX_t]` (storing only the previous batch's last row, O(d) memory), so
   the crystal becomes sensitive to rate-of-change transients in industrial
   telemetry. `crystal_X` and `get_training_data()` stay in the original
-  `d`-dimensional feature space — downstream models are unaffected.
+  `d`-dimensional feature space — downstream models are unaffected. *Measured
+  trade-off* (see section 5 below): better transient representation, measurably
+  worse background RMSE — use it only when rate-of-change transients are the
+  target regime; the default remains `False`.
 
 ## Multi-seed benchmark results (20 seeds, paired Wilcoxon)
 
@@ -199,6 +202,32 @@ superconductors) the naive response is either blindness (RMSE 57 K) or catastrop
 forgetting (old domain degrades 13.4 → 20.6 K). Surgical heal captures the new
 domain *and* keeps the old one — with a hard cap on crystal size for production
 memory budgets.
+
+### 5. Streaming deltas under vibration bursts (`bench_deltas.py`)
+
+Does `include_deltas=True` earn its keep? Synthetic 4D AR(1) telemetry with rare
+3-step vibration bursts (innovation variance ×6, y jump +3.5): marginally the
+burst rows sit in the *same* X distribution as the background, so their only
+geometric signature is the rate of change ΔX. Temporal split (6,400 train / 2,600
+test, 1.45% burst rows), paired crystals per seed (identical except
+`include_deltas`), 20 seeds, single source of truth: `bench_deltas_results.json`.
+
+| Metric (median over 20 seeds) | deltas off | deltas on | Random coreset | Paired Wilcoxon (on vs off) |
+| :--- | :---: | :---: | :---: | :---: |
+| Burst rows captured in crystal (of 93) | 15.0 | **17.0** | 3.0 | 12/20, $p=0.12$ (n.s.) |
+| GBM RMSE on test burst rows | 3.77 | **3.50** | — | **14/20 wins, $p=0.036$** |
+| KRR RMSE on test burst rows | 4.15 | 4.18 | — | 10/20, $p=0.62$ (n.s.) |
+| KRR RMSE all (background cost) | **0.554** | 0.610 | — | 3/20, $p=4.8\times10^{-5}$ (deltas worse) |
+| GBM RMSE all (background cost) | **0.710** | 0.778 | — | 7/20, $p=3.7\times10^{-3}$ (deltas worse) |
+
+Honest verdict: `include_deltas` is a *targeted* mode, not a free win. It
+significantly improves GBM accuracy on the transient regime and lifts burst
+capture (17 vs 15 vs 3 for Random), but pays a measurable background cost
+(≈10% higher KRR RMSE on in-distribution rows). Both coreset variants capture
+bursts far above Random, and the residual/leverage trigger already finds burst
+rows through their elevated |y| — the delta channel refines *which* of them get
+their own Voronoi cells. Recommendation: enable it only for transient-dominated
+telemetry; the default remains `False`.
 
 ## Known limitations
 
