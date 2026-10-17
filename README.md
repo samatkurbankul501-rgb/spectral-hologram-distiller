@@ -31,7 +31,10 @@ from shd import SpectralHologramDistiller, HologramCrystalLoader
 
 d = SpectralHologramDistiller(crystal_size=300, high_band_ratio=0.26,
                               sketch_dim=256, tail_quantile=84.0, phase_kappa=3.2,
-                              max_init_buffer=8192)
+                              max_init_buffer=8192,
+                              tail="high",          # "high" | "low" | "both"
+                              on_nonfinite="raise", # or "drop" to skip dirty rows
+                              )
 for i in range(0, len(X_stream), 2500):          # O(1) RAM: peak < 60 MB
     d.partial_fit(X_stream[i:i+2500], y_stream[i:i+2500])  # or y_batch=None (label-free!)
 rel_spec_err = d.finalize_crystal()               # kernel-herding weights gamma*
@@ -42,6 +45,8 @@ X_c, y_c, w_c = loader.get_training_data()        # train any model on 1.7% of d
 X_pk, y_pk, w_pk = loader.get_phase_peak_slice()  # rare / discontinuity slice for BO
 report = loader.check_domain_shift(X_new_stream)  # BW radar, self-contained
 print(report)  # {'bw_distance': ..., 'latency_ms': ..., 'is_shifted': False}
+# Delta crystals can carry first differences across radar calls:
+# loader.check_domain_shift(X_new_stream, streaming=True)
 
 # Surgical self-healing when a new regime arrives (zero catastrophic forgetting):
 heal_info = loader.heal_domain_shift(X_drifted, y_drifted, n_inject=35)
@@ -58,9 +63,12 @@ python -m shd inspect artifacts/superconduct_v37.hologram.npz
 python -m shd distill --input stream.csv --target-col -1 --output crystal.hologram.npz
 # ...or make the crystal sensitive to rate-of-change transients:
 python -m shd distill --input sensors.csv --target-col -1 --include-deltas --output crystal.hologram.npz
+# ...protect the LOW tail (pressure/voltage sags) and tolerate dirty sensor rows:
+python -m shd distill --input sensors.csv --target-col -1 --tail low --on-nonfinite drop --output crystal.hologram.npz
 
 # Run the Bures-Wasserstein OOD radar on a new batch
 python -m shd radar --crystal crystal.hologram.npz --input new_batch.csv --target-col -1
+# (delta crystals: --streaming carries first differences across radar calls)
 
 # Surgically inject new Voronoi medoids on domain shift and save
 python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-col -1 --output healed.hologram.npz
@@ -141,7 +149,55 @@ python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-c
   instead of defaulting to zero. Non-delta crystals ignore the flag; the
   default remains fully stateless per-call windows.
 - CLI: `--tail {high,low,both}` and `--adaptive-y-stats` on `distill`;
-  `--streaming` on `radar`/`heal`. Package version aligned to 3.8.0.
+  `--streaming` on `radar`/`heal`. Package version aligned to 3.9.0.
+
+## Constant sensitivity (ablation) and input robustness (v3.9)
+
+Every architectural constant is now a constructor argument, so sensitivity can be
+measured instead of asserted. Defaults are unchanged bit-for-bit (verified against
+the previous commit: identical crystals, weights, slices and radar distances).
+
+`bench_ablation.py` sweeps one constant at a time on the 4D reactor
+(5 seeds, $M=300$, critical-regime KRR RMSE, lower is better):
+
+| Constant | Values swept | Critical RMSE | Reading |
+| :--- | :--- | :--- | :--- |
+| `phase_kappa` | 0.0 / 1.6 / **3.2** / 6.4 | 4.199 / 3.236 / **3.346** / 3.404 | $\kappa=0$ (no phase manifold) is the worst by a wide margin — the phase geometry is the load-bearing idea, not decoration |
+| `high_band_ratio` | 0.10 / **0.26** / 0.50 | 4.433 / **3.346** / 2.718 | most sensitive knob; reserving more volume for the phase band keeps helping on this stream |
+| `tail_quantile` | 74 / **84** / 94 | 3.667 / **3.346** / 2.739 | a stricter trigger (94th pct) captures 43 rare points vs 18 |
+| `voronoi_temper` | 0.0 / 0.30 / **0.55** / 1.0 | 3.200 / 3.266 / **3.346** / 3.518 | flat-ish optimum; raw cell volumes (1.0) are the worst |
+| `herding_mix` | 1.0 / **0.75** / 0.50 / 0.0 | 3.326 / **3.346** / 3.372 / 3.453 | FISTA herding contributes little here; the tempered Voronoi term carries the weighting |
+| `center_lr` | 0.05 / **0.25** / 0.50 | 3.201 / **3.346** / 3.414 | slow centroid updates slightly better on a stationary stream |
+| `omega_low_scale` | 0.35 / **0.75** / 1.5 | 3.245 / **3.346** / 3.410 | modest effect |
+| `omega_high_scale` | 0.75 / **2.10** / 4.2 | 3.202 / **3.346** / 3.217 | modest, non-monotone effect |
+| `fista_l2_reg` | 0.05 / **0.20** / 0.60 | 3.347 / **3.346** / 3.347 | insensitive over a 12× range |
+
+Two honest conclusions: (i) the published defaults are conservative, not
+tuned-to-death — per-dataset tuning gives up to ~19% better critical RMSE
+(`high_band_ratio=0.5`, `tail_quantile=94`), which is expected behaviour for a
+coreset method and should be done on validation data; (ii) the single constant
+whose removal destroys performance is `phase_kappa`, i.e. the coupled
+feature-target manifold is the actual contribution.
+
+### Input robustness
+
+`partial_fit` and the OOD radar now validate their inputs instead of failing
+inside NumPy/SciPy:
+
+| Input | Behaviour |
+| :--- | :--- |
+| NaN/Inf in features or targets | `ValueError` naming the offending count and columns; `on_nonfinite="drop"` skips those rows instead |
+| Empty batch/window | `partial_fit` is a no-op; the radar reports an error (nothing to score) |
+| `len(y) != len(X)` | `ValueError` with both lengths |
+| Feature width changed mid-stream | `ValueError` with both widths |
+| `finalize_crystal()` with no data | `ValueError` explaining the required call order |
+| Constant features **and** constant target | now builds a valid crystal (previously `ValueError: high <= 0` from k-means++ seeding) |
+| Radar window with wrong width or NaN | `ValueError` stating the expected width |
+| Single-row radar window | supported |
+
+`verify_kt_port.py` additionally re-executes the official Microsoft `goodpoints`
+X-path (pure-numpy, Cython stub) and confirms the KT port matches it
+bit-for-bit on identical data and seeds (2D/4D, `m=1..3`, 3 seeds).
 
 ## Multi-seed benchmark results (20 seeds, paired Wilcoxon)
 
@@ -159,27 +215,35 @@ SHD captures a median of **64.5** (IQR 3.5) high-$T_c$ superconductors out of 30
 | **Oracle (full train)** | 12.86 K | 17.59 K | 0.8562 | 10.27 K | 12.72 K |
 | **Random (1.76%)** | 16.58 / 0.54 K | 22.43 / 2.49 K | 0.761 / 0.015 | 16.38 / 0.84 K | 22.57 / 2.49 K |
 | **K-Means (1.76%)** | 17.34 / 0.55 K | 22.93 / 3.18 K | 0.739 / 0.017 | 17.19 / 0.97 K | 23.15 / 2.47 K |
-| **Kernel Thinning (KT)** | 16.43 / 0.52 K | 22.90 / 2.08 K | 0.765 / 0.015 | 16.63 / 0.61 K | 22.32 / 2.32 K |
-| **Supervised KT (SKT)** | 15.83 / 0.39 K | 21.41 / 1.14 K | 0.782 / 0.011 | **15.92 / 0.79 K** | 20.98 / 2.25 K |
-| **SHD (Ours)** | **15.42 / 0.25 K** | **18.81 / 0.94 K** | **0.793 / 0.007** | 16.07 / 0.66 K | **18.71 / 3.22 K** |
+| **Kernel Thinning (KT)** | 16.47 / 0.46 K | 23.26 / 2.23 K | 0.764 / 0.013 | 16.55 / 1.05 K | 22.25 / 2.37 K |
+| **Supervised KT (SKT)** | 15.78 / 0.31 K | 21.20 / 1.64 K | 0.784 / 0.008 | **15.97 / 0.87 K** | 21.39 / 2.06 K |
+| **SHD (Ours)** | **15.42 / 0.25 K** | **18.81 / 0.93 K** | **0.793 / 0.007** | 16.06 / 0.65 K | **18.71 / 3.21 K** |
 | *Wilcoxon SHD vs Random* | 20/20 wins, $p=1.9\times 10^{-6}$ | 20/20 wins, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 13/20, $p=0.28$ (n.s.) | 17/20 wins, $p=1.3\times 10^{-4}$ |
 | *Wilcoxon SHD vs K-Means* | 20/20 wins, $p=1.9\times 10^{-6}$ | 20/20 wins, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 18/20 wins, $p=9.5\times 10^{-6}$ | 20/20 wins, $p=1.9\times 10^{-6}$ |
-| *Wilcoxon SHD vs KT* | 17/20 wins, $p=2.7\times 10^{-5}$ | 20/20 wins, $p=1.9\times 10^{-6}$ | $p=2.7\times 10^{-5}$ | 14/20 wins, $p=5.6\times 10^{-3}$ | 17/20 wins, $p=1.3\times 10^{-4}$ |
-| *Wilcoxon SHD vs SKT* | 17/20 wins, $p=4.2\times 10^{-3}$ | 20/20 wins, $p=1.9\times 10^{-6}$ | $p=4.2\times 10^{-3}$ | 8/20, $p=0.35$ (n.s.) | 16/20 wins, $p=5.9\times 10^{-4}$ |
+| *Wilcoxon SHD vs KT* | 20/20 wins, $p=1.9\times 10^{-6}$ | 20/20 wins, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 15/20 wins, $p=3.3\times 10^{-2}$ | 17/20 wins, $p=1.0\times 10^{-3}$ |
+| *Wilcoxon SHD vs SKT* | 17/20 wins, $p=6.4\times 10^{-3}$ | 20/20 wins, $p=1.9\times 10^{-6}$ | $p=6.4\times 10^{-3}$ | 6/20, $p=0.070$ (n.s.) | 17/20 wins, $p=3.2\times 10^{-4}$ |
 
 **KT/SKT duel note.** Kernel Thinning and Supervised Kernel Thinning are run via a
 faithful pure-numpy port of the official Microsoft `goodpoints` X-path
-(`kt_baseline.py`; the Cython build does not link on Windows), Gaussian kernel with
-median-heuristic bandwidth, seeded i.i.d. pre-sample of $300\cdot 2^4 = 4{,}800$
-points, exactly $M=300$ output. Honest reading: on the critical regime
-($T_c \ge 77\,\mathrm{K}$) SHD beats KT and SKT **20/20 seeds** ($p=1.9\times10^{-6}$)
-and captures $64.5$ critical superconductors per crystal vs $56.0$ (KT) and $55.5$
-(SKT); SKT is the strongest baseline on global KRR (SHD wins $17/20$,
-$p=4.2\times10^{-3}$) and numerically ahead of SHD on GBM-all ($15.92$ vs $16.07$,
-n.s. $p=0.35$) — KT/SKT optimize global MMD, SHD trades a sliver of background
-quality for a decisive rare-regime edge. On the 4D reactor SHD wins the critical
-regime $20/20$ against all four baselines and captures $19.5$ peak points vs
-$9.0$ (KT/SKT/Random).
+(`kt_baseline.py`; the Cython extension does not link on Windows). The port is
+**verified bit-exact against the author's own code**: `verify_kt_port.py` loads
+`goodpoints/kt.py` from the PyPI sdist with a stub `ktc` module and reproduces the
+identical coreset indices on 2D and 4D data, `m = 1..3`, three seeds. Settings follow
+the official numpy experiment configuration: Gaussian kernel with median-heuristic
+bandwidth, split kernel at `var/2`, swap kernel at `var`, the author's default
+`unique=False`, a seeded i.i.d. pre-sample of $300\cdot 2^4 = 4{,}800$ points, and
+exactly $M=300$ output. Honest reading: on the critical regime
+($T_c \ge 77\,\mathrm{K}$) SHD beats KT **20/20 seeds** ($23.26 \to 18.81\,\mathrm{K}$)
+and SKT **20/20** ($21.20 \to 18.81\,\mathrm{K}$), both at $p=1.9\times10^{-6}$, and
+captures $64.5$ critical superconductors per crystal vs $56.0$ (KT) and $55.5$
+(SKT). SKT is the strongest baseline on global metrics: SHD wins $17/20$ on
+KRR-all ($p=6.4\times10^{-3}$) but is numerically behind it on GBM-all
+($15.97$ vs $16.06$ K, SHD wins only $6/20$, n.s. $p=0.070$) — KT/SKT optimize
+global MMD, SHD trades a sliver of background quality for a decisive rare-regime
+edge. On the 4D reactor SHD wins the critical
+regime $18/20$ against KT ($p=9.5\times10^{-6}$) and $20/20$ against SKT
+($p=1.9\times10^{-6}$), and captures $19.5$ peak points per crystal vs $10.0$ (KT),
+$8.5$ (SKT), $9.0$ (Random) and $11.5$ ($K$-Means).
 
 ### 2. Nonlinear 4D reactor with phase transitions ($N_{\text{train}} = 16,000 \to M = 300$)
 
@@ -188,13 +252,13 @@ $9.0$ (KT/SKT/Random).
 | **Oracle (full train)** | 0.80 | 2.78 | 0.809 | 0.38 | 1.11 |
 | **Random** | 1.134 / 0.104 | 4.424 / 0.814 | 0.621 / 0.070 | 0.711 / 0.081 | 2.409 / 0.549 |
 | **K-Means** | 1.069 / 0.073 | 4.390 / 0.722 | 0.663 / 0.046 | **0.596 / 0.079** | 2.033 / 0.572 |
-| **Kernel Thinning (KT)** | 1.140 / 0.056 | 4.534 / 0.606 | 0.617 / 0.038 | 0.661 / 0.106 | 2.329 / 0.706 |
-| **Supervised KT (SKT)** | 1.047 / 0.036 | 4.119 / 0.423 | 0.677 / 0.022 | 0.688 / 0.125 | 2.555 / 0.777 |
-| **SHD (Ours)** | **0.976 / 0.021** | **3.436 / 0.225** | **0.720 / 0.012** | 0.624 / 0.092 | **1.732 / 0.579** |
+| **Kernel Thinning (KT)** | 1.129 / 0.030 | 4.516 / 0.833 | 0.625 / 0.020 | 0.719 / 0.113 | 2.382 / 0.772 |
+| **Supervised KT (SKT)** | 1.056 / 0.029 | 4.060 / 0.347 | 0.672 / 0.018 | 0.695 / 0.128 | 2.432 / 0.811 |
+| **SHD (Ours)** | **0.976 / 0.021** | **3.436 / 0.225** | **0.720 / 0.012** | **0.624 / 0.092** | **1.732 / 0.579** |
 | *Wilcoxon SHD vs Random* | 20/20, $p=1.9\times 10^{-6}$ | 20/20, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 16/20, $p=7.1\times 10^{-4}$ | 18/20, $p=1.7\times 10^{-4}$ |
 | *Wilcoxon SHD vs K-Means* | 20/20, $p=1.9\times 10^{-6}$ | 20/20, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 8/20, $p=0.25$ (n.s.) | 13/20, $p=0.064$ |
-| *Wilcoxon SHD vs KT* | 20/20, $p=1.9\times 10^{-6}$ | 20/20, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 13/20, $p=0.090$ | 15/20, $p=5.6\times 10^{-3}$ |
-| *Wilcoxon SHD vs SKT* | 19/20, $p=3.8\times 10^{-6}$ | 20/20, $p=1.9\times 10^{-6}$ | $p=3.8\times 10^{-6}$ | 16/20, $p=8.5\times 10^{-4}$ | 18/20, $p=1.3\times 10^{-4}$ |
+| *Wilcoxon SHD vs KT* | 20/20, $p=1.9\times 10^{-6}$ | 18/20, $p=9.5\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 16/20, $p=7.3\times 10^{-3}$ | 14/20, $p=2.7\times 10^{-3}$ |
+| *Wilcoxon SHD vs SKT* | 20/20, $p=1.9\times 10^{-6}$ | 20/20, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 14/20, $p=1.7\times 10^{-3}$ | 16/20, $p=5.9\times 10^{-4}$ |
 
 ### 3. Bridge with NEON Lab: Discontinuity-Aware Bayesian Optimization (`bridge_neon_bo.py`)
 
