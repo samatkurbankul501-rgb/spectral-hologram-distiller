@@ -190,7 +190,7 @@ truth: `bench_heal_superconduct_results.json` (20 seeds, paired Wilcoxon).
 | :--- | :--- | :--- |
 | False alarms on in-distribution Domain A | BW = 0.035 vs threshold 0.085 | **0/20** |
 | OOD detections on Domain B (cuprates) | BW = 0.636 | **20/20** |
-| Post-heal BW on Domain B | 0.465 | radar accepts healed domain |
+| Post-heal BW on Domain B | 0.465 | passport blends toward the new domain (0.636 → 0.465); one heal does **not** yet clear the 0.085 alert threshold |
 | KRR RMSE on new Domain B | **26.88 K** healed vs **57.17 K** pre-heal | 20/20, $p=1.9\times10^{-6}$ |
 | GBM RMSE on new Domain B | **19.38 K** vs **54.57 K** | 20/20, $p=1.9\times10^{-6}$ |
 | Old Domain A retention vs naive overwrite | KRR **13.36 K** vs **20.62 K** | 20/20, $p=1.9\times10^{-6}$ |
