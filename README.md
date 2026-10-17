@@ -159,9 +159,27 @@ SHD captures a median of **64.5** (IQR 3.5) high-$T_c$ superconductors out of 30
 | **Oracle (full train)** | 12.86 K | 17.59 K | 0.8562 | 10.27 K | 12.72 K |
 | **Random (1.76%)** | 16.58 / 0.54 K | 22.43 / 2.49 K | 0.761 / 0.015 | 16.38 / 0.84 K | 22.57 / 2.49 K |
 | **K-Means (1.76%)** | 17.34 / 0.55 K | 22.93 / 3.18 K | 0.739 / 0.017 | 17.19 / 0.97 K | 23.15 / 2.47 K |
-| **SHD v3.7 (1.76%)** | **15.42 / 0.25 K** | **18.81 / 0.94 K** | **0.793 / 0.007** | **16.07 / 0.66 K** | **18.71 / 3.22 K** |
+| **Kernel Thinning (KT)** | 16.43 / 0.52 K | 22.90 / 2.08 K | 0.765 / 0.015 | 16.63 / 0.61 K | 22.32 / 2.32 K |
+| **Supervised KT (SKT)** | 15.83 / 0.39 K | 21.41 / 1.14 K | 0.782 / 0.011 | **15.92 / 0.79 K** | 20.98 / 2.25 K |
+| **SHD (Ours)** | **15.42 / 0.25 K** | **18.81 / 0.94 K** | **0.793 / 0.007** | 16.07 / 0.66 K | **18.71 / 3.22 K** |
 | *Wilcoxon SHD vs Random* | 20/20 wins, $p=1.9\times 10^{-6}$ | 20/20 wins, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 13/20, $p=0.28$ (n.s.) | 17/20 wins, $p=1.3\times 10^{-4}$ |
 | *Wilcoxon SHD vs K-Means* | 20/20 wins, $p=1.9\times 10^{-6}$ | 20/20 wins, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 18/20 wins, $p=9.5\times 10^{-6}$ | 20/20 wins, $p=1.9\times 10^{-6}$ |
+| *Wilcoxon SHD vs KT* | 17/20 wins, $p=2.7\times 10^{-5}$ | 20/20 wins, $p=1.9\times 10^{-6}$ | $p=2.7\times 10^{-5}$ | 14/20 wins, $p=5.6\times 10^{-3}$ | 17/20 wins, $p=1.3\times 10^{-4}$ |
+| *Wilcoxon SHD vs SKT* | 17/20 wins, $p=4.2\times 10^{-3}$ | 20/20 wins, $p=1.9\times 10^{-6}$ | $p=4.2\times 10^{-3}$ | 8/20, $p=0.35$ (n.s.) | 16/20 wins, $p=5.9\times 10^{-4}$ |
+
+**KT/SKT duel note.** Kernel Thinning and Supervised Kernel Thinning are run via a
+faithful pure-numpy port of the official Microsoft `goodpoints` X-path
+(`kt_baseline.py`; the Cython build does not link on Windows), Gaussian kernel with
+median-heuristic bandwidth, seeded i.i.d. pre-sample of $300\cdot 2^4 = 4{,}800$
+points, exactly $M=300$ output. Honest reading: on the critical regime
+($T_c \ge 77\,\mathrm{K}$) SHD beats KT and SKT **20/20 seeds** ($p=1.9\times10^{-6}$)
+and captures $64.5$ critical superconductors per crystal vs $56.0$ (KT) and $55.5$
+(SKT); SKT is the strongest baseline on global KRR (SHD wins $17/20$,
+$p=4.2\times10^{-3}$) and numerically ahead of SHD on GBM-all ($15.92$ vs $16.07$,
+n.s. $p=0.35$) — KT/SKT optimize global MMD, SHD trades a sliver of background
+quality for a decisive rare-regime edge. On the 4D reactor SHD wins the critical
+regime $20/20$ against all four baselines and captures $19.5$ peak points vs
+$9.0$ (KT/SKT/Random).
 
 ### 2. Nonlinear 4D reactor with phase transitions ($N_{\text{train}} = 16,000 \to M = 300$)
 
@@ -170,9 +188,13 @@ SHD captures a median of **64.5** (IQR 3.5) high-$T_c$ superconductors out of 30
 | **Oracle (full train)** | 0.80 | 2.78 | 0.809 | 0.38 | 1.11 |
 | **Random** | 1.134 / 0.104 | 4.424 / 0.814 | 0.621 / 0.070 | 0.711 / 0.081 | 2.409 / 0.549 |
 | **K-Means** | 1.069 / 0.073 | 4.390 / 0.722 | 0.663 / 0.046 | **0.596 / 0.079** | 2.033 / 0.572 |
-| **SHD v3.7** | **0.976 / 0.021** | **3.436 / 0.225** | **0.720 / 0.012** | 0.624 / 0.092 | **1.732 / 0.579** |
+| **Kernel Thinning (KT)** | 1.140 / 0.056 | 4.534 / 0.606 | 0.617 / 0.038 | 0.661 / 0.106 | 2.329 / 0.706 |
+| **Supervised KT (SKT)** | 1.047 / 0.036 | 4.119 / 0.423 | 0.677 / 0.022 | 0.688 / 0.125 | 2.555 / 0.777 |
+| **SHD (Ours)** | **0.976 / 0.021** | **3.436 / 0.225** | **0.720 / 0.012** | 0.624 / 0.092 | **1.732 / 0.579** |
 | *Wilcoxon SHD vs Random* | 20/20, $p=1.9\times 10^{-6}$ | 20/20, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 16/20, $p=7.1\times 10^{-4}$ | 18/20, $p=1.7\times 10^{-4}$ |
 | *Wilcoxon SHD vs K-Means* | 20/20, $p=1.9\times 10^{-6}$ | 20/20, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 8/20, $p=0.25$ (n.s.) | 13/20, $p=0.064$ |
+| *Wilcoxon SHD vs KT* | 20/20, $p=1.9\times 10^{-6}$ | 20/20, $p=1.9\times 10^{-6}$ | $p=1.9\times 10^{-6}$ | 13/20, $p=0.090$ | 15/20, $p=5.6\times 10^{-3}$ |
+| *Wilcoxon SHD vs SKT* | 19/20, $p=3.8\times 10^{-6}$ | 20/20, $p=1.9\times 10^{-6}$ | $p=3.8\times 10^{-6}$ | 16/20, $p=8.5\times 10^{-4}$ | 18/20, $p=1.3\times 10^{-4}$ |
 
 ### 3. Bridge with NEON Lab: Discontinuity-Aware Bayesian Optimization (`bridge_neon_bo.py`)
 

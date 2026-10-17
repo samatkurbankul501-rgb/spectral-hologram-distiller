@@ -31,6 +31,7 @@ from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
+from kt_baseline import kt_skt_joint, kt_thin, median_bandwidth_sq
 from shd import SpectralHologramDistiller
 
 
@@ -99,6 +100,55 @@ def build_kmeans(X_tr, y_tr, Z_tr, seed, m):
     return X_tr[idx], y_tr[idx], w
 
 
+def _kt_subsample_and_halvings(n_total, target_m):
+    """Find the largest halving count h in {4,3,2,1} where target_m * 2^h <= n_total.
+
+    For m=300 and n=16k-17k: h=4, n_sub=4800, so kt_thin(..., m=4) returns
+    exactly 4800 // 16 = 300 points, perfectly matching the crystal budget.
+    """
+    for h in (4, 3, 2, 1):
+        if target_m * (2 ** h) <= n_total:
+            return target_m * (2 ** h), h
+    return n_total, 0
+
+
+def build_kt(X_tr, y_tr, Z_tr, seed, m):
+    """Unsupervised Kernel Thinning (Dwivedi & Mackey, JMLR 2024).
+
+    Compresses an i.i.d. subsample of size m*2^h down to m points using
+    a Gaussian kernel on standard-scaled features Z_tr with median-heuristic
+    bandwidth. Coreset is unweighted empirical.
+    """
+    rng = np.random.default_rng(seed)
+    n_sub, h = _kt_subsample_and_halvings(len(X_tr), m)
+    sub_idx = rng.choice(len(X_tr), size=n_sub, replace=False)
+    Z_sub = Z_tr[sub_idx]
+    var = median_bandwidth_sq(Z_sub, seed=seed)
+    thin_idx = kt_thin(Z_sub, h, var, seed=seed)
+    final_idx = sub_idx[thin_idx]
+    return X_tr[final_idx], y_tr[final_idx], None
+
+
+def build_skt(X_tr, y_tr, Z_tr, seed, m):
+    """Supervised Kernel Thinning (Gong, Choi & Dwivedi, NeurIPS 2024).
+
+    Runs KT on the product kernel k_X(z, z') * k_Y(y, y'), equivalently a
+    Gaussian kernel on joint vectors [Z, sqrt(var_X / var_Y) * y_std].
+    """
+    rng = np.random.default_rng(seed)
+    n_sub, h = _kt_subsample_and_halvings(len(X_tr), m)
+    sub_idx = rng.choice(len(X_tr), size=n_sub, replace=False)
+    Z_sub = Z_tr[sub_idx]
+    y_sub = y_tr[sub_idx]
+    y_scaled = (y_sub - float(np.mean(y_sub))) / (float(np.std(y_sub)) + 1e-12)
+    var_x = median_bandwidth_sq(Z_sub, seed=seed)
+    var_y = median_bandwidth_sq(y_scaled, seed=seed)
+    W_sub, var_w = kt_skt_joint(Z_sub, y_scaled, var_x, var_y)
+    thin_idx = kt_thin(W_sub, h, var_w, seed=seed)
+    final_idx = sub_idx[thin_idx]
+    return X_tr[final_idx], y_tr[final_idx], None
+
+
 # --- model evaluation ----------------------------------------------------------
 
 
@@ -134,7 +184,7 @@ def eval_models(X_c, y_c, w_c, scaler, model_seed, X_te, Z_te, y_te, X_te_crit, 
 # --- per-dataset experiment -----------------------------------------------------
 
 
-def run_dataset(key, seeds, m, batch, model_seed):
+def run_dataset(key, seeds, m, batch, model_seed, include_kt=True):
     t0 = time.perf_counter()
     if key == "superconduct":
         X_raw, y_raw, crit_threshold, title = load_superconduct()
@@ -188,21 +238,36 @@ def run_dataset(key, seeds, m, batch, model_seed):
         Xc, yc, wc = build_random(X_tr, y_tr, seed, m)
         rec["random"] = eval_models(Xc, yc, wc, scaler, model_seed,
                                     X_te, Z_te, y_te, X_te_crit, Z_te_crit, y_te_crit, rbf_gamma)
+        rec["random"]["rare_captured"] = int(np.sum(yc >= crit_threshold))
 
         Xc, yc, wc = build_kmeans(X_tr, y_tr, Z_tr, seed, m)
         rec["kmeans"] = eval_models(Xc, yc, wc, scaler, model_seed,
                                     X_te, Z_te, y_te, X_te_crit, Z_te_crit, y_te_crit, rbf_gamma)
+        rec["kmeans"]["rare_captured"] = int(np.sum(yc >= crit_threshold))
+
+        if include_kt:
+            Xc, yc, wc = build_kt(X_tr, y_tr, Z_tr, seed, m)
+            rec["kt"] = eval_models(Xc, yc, wc, scaler, model_seed,
+                                    X_te, Z_te, y_te, X_te_crit, Z_te_crit, y_te_crit, rbf_gamma)
+            rec["kt"]["rare_captured"] = int(np.sum(yc >= crit_threshold))
+
+            Xc, yc, wc = build_skt(X_tr, y_tr, Z_tr, seed, m)
+            rec["skt"] = eval_models(Xc, yc, wc, scaler, model_seed,
+                                     X_te, Z_te, y_te, X_te_crit, Z_te_crit, y_te_crit, rbf_gamma)
+            rec["skt"]["rare_captured"] = int(np.sum(yc >= crit_threshold))
 
         records.append(rec)
+        kt_s = f" kt={rec['kt']['krr_rmse_crit']:.2f} skt={rec['skt']['krr_rmse_crit']:.2f}" if include_kt else ""
         print(f"[{key}] seed {seed:2d}: shd krr_crit={rec['shd']['krr_rmse_crit']:.2f} "
-              f"rand={rec['random']['krr_rmse_crit']:.2f} km={rec['kmeans']['krr_rmse_crit']:.2f} "
+              f"rand={rec['random']['krr_rmse_crit']:.2f} km={rec['kmeans']['krr_rmse_crit']:.2f}{kt_s} "
               f"rare={n_rare} ({time.perf_counter() - t_s:.1f}s)")
 
     # Paired Wilcoxon tests.
     tests = {}
+    pairs = [p for p in ["random", "kmeans", "kt", "skt"] if p in records[0]]
     for metric in ["krr_rmse_all", "krr_rmse_crit", "krr_r2", "gbm_rmse_all", "gbm_rmse_crit", "gbm_r2"]:
         higher_is_better = metric.endswith("_r2")
-        for pair in ["random", "kmeans"]:
+        for pair in pairs:
             a = np.array([r["shd"][metric] for r in records])
             b = np.array([r[pair][metric] for r in records])
             diff = a - b
@@ -244,10 +309,12 @@ def main():
     ap.add_argument("--seeds", type=int, default=20)
     ap.add_argument("--dataset", choices=["superconduct", "reactor", "both", "summary"], default="both")
     ap.add_argument("--model-seed", type=int, default=42)
+    ap.add_argument("--skip-kt", action="store_true", help="Skip the slower KT and SKT arms")
+    ap.add_argument("--output", default="bench_seeds_results.json", help="Output JSON path")
     args = ap.parse_args()
 
     seeds = list(range(args.seeds))
-    path = "bench_seeds_results.json"
+    path = args.output
     out = {"config": {"n_seeds": args.seeds, "model_seed": args.model_seed}, "results": {}}
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -261,15 +328,19 @@ def main():
     else:
         keys = ["superconduct", "reactor"] if args.dataset == "both" else [args.dataset]
         for key in keys:
-            out["results"][key] = run_dataset(key, seeds, m=300, batch=2500, model_seed=args.model_seed)
+            out["results"][key] = run_dataset(
+                key, seeds, m=300, batch=2500, model_seed=args.model_seed,
+                include_kt=not args.skip_kt,
+            )
 
     # Recompute Wilcoxon + IQR across all stored datasets to guarantee schema uniformity.
     for key, res in out["results"].items():
         records = res["records"]
+        pairs = [p for p in ["random", "kmeans", "kt", "skt"] if p in records[0]]
         tests = {}
         for metric in ["krr_rmse_all", "krr_rmse_crit", "krr_r2", "gbm_rmse_all", "gbm_rmse_crit", "gbm_r2"]:
             higher_is_better = metric.endswith("_r2")
-            for pair in ["random", "kmeans"]:
+            for pair in pairs:
                 a = np.array([r["shd"][metric] for r in records])
                 b = np.array([r[pair][metric] for r in records])
                 diff = a - b
@@ -298,8 +369,9 @@ def main():
         print(f"Oracle KRR: all={r['oracle']['krr_rmse_all']:.2f} crit={r['oracle']['krr_rmse_crit']:.2f} r2={r['oracle']['krr_r2']:.4f}")
         print(f"Oracle GBM: all={r['oracle']['gbm_rmse_all']:.2f} crit={r['oracle']['gbm_rmse_crit']:.2f} r2={r['oracle']['gbm_r2']:.4f}")
         print(f"Rare captured by SHD: median={np.median(rares):.1f} (IQR={np.percentile(rares,75)-np.percentile(rares,25):.1f})")
+        pairs = [p for p in ["random", "kmeans", "kt", "skt"] if p in r["records"][0]]
         for metric in ["krr_rmse_all", "krr_rmse_crit", "krr_r2", "gbm_rmse_all", "gbm_rmse_crit", "gbm_r2"]:
-            for pair in ["random", "kmeans"]:
+            for pair in pairs:
                 t = r["wilcoxon"][f"shd_vs_{pair}_{metric}"]
                 print(
                     f"  {metric:14s} vs {pair:6s}: shd {t['median_shd']:.3f} (IQR {t['iqr_shd']:.3f}) "
