@@ -128,7 +128,7 @@ A batch-adaptive threshold $\tau(B) = 0.085 \cdot \max(1, \sqrt{1024/B})$ trigge
 
 \subsection{Multi-Seed Benchmarks on Physical Science Datasets}
 
-We evaluate SHD across 20 independent seeds on two testbeds (one real, one synthetic):
+We evaluate SHD across 20 independent seeds on two primary testbeds (one real, one synthetic), plus a third real stream in Section~\ref{sec:pm25}:
 \begin{enumerate}
     \item \textbf{UCI Superconductivity} \citep{hamidieh2018data}: 21,263 materials characterized by 81 chemical/physical features. The goal is to predict superconducting transition temperature $T_c$. The critical regime is defined as high-temperature superconductors ($T_c \ge 77\,\mathrm{K}$, liquid nitrogen boundary), comprising 18.6\% of the dataset (3,952 / 21,263; 778 of 4,253 test rows).
     \item \textbf{4D Phase-Transition Reactor}: 20,000 observations of a 4-dimensional non-linear chemical dynamics system with an exothermic transition peak exceeding the 97th percentile of $y$.
@@ -201,6 +201,34 @@ Superconductivity & \textbf{15.57} / 15.99 & \textbf{18.98} / 19.38 & \textbf{18
 \end{tabular}
 \end{table}
 
+\subsection{Second Real Stream: Beijing PM2.5}
+\label{sec:pm25}
+
+The superconductivity benchmark has an 18.6\% critical regime; the reactor is synthetic. We therefore evaluate the UCI Beijing PM2.5 stream \citep{liang2015pm25} (41,757 rows, 14 features, time-ordered 80/20 split; critical $=324\,\mu g/m^3$ (top 3\% of the training stream), with 374 critical test rows). This is a deliberately harder regime for the default 26\% band: only 3\% of rows are critical, and the stream has strong seasonal drift.
+
+Table~\ref{tab:pm25} shows the honest result. The single-crystal default loses global RMSE to KT ($95.1$ vs $89.9\,\mu g/m^3$) and Random ($88.2$), and its critical advantage over KT is not significant ($231.0$ vs $245.7$; 13/20, $p=0.216$). The critical-aware band (SHD-C, $\beta$ set from the observed critical fraction) improves critical RMSE to $216.6$ and rare capture to 25, but degrades global KRR to $101.2$. Adding a 300-medoid global guard recovers the global stream ($85.3$ KRR-all, $78.9$ GBM-all) while keeping critical RMSE at $196.0$ and rare capture at 29. This confirms that SHD is not a universal single-crystal replacement: for 3\% regimes the default band must be critical-aware, and production deployments need either a guard or a domain bank (Section~\ref{sec:passport}).
+
+\begin{table}[t]
+\centering
+\small
+\caption{Beijing PM2.5 (14 features, time-ordered split, critical $=324\,\mu g/m^3$, 374 critical test rows). RMSE in $\mu g/m^3$; lower is better. SHD and baselines use 20 seeds; SHD-C uses 20 seeds; the SHD-C+guard row uses 5 seeds.}
+\label{tab:pm25}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Method} & \textbf{KRR All} & \textbf{KRR Crit} & \textbf{GBM All} & \textbf{GBM Crit} & \textbf{Rare} \\
+\midrule
+Random & 88.24 & 248.92 & 80.05 & 225.51 & 9 \\
+$K$-Means & 88.92 & 241.18 & \textbf{78.31} & 213.79 & 6 \\
+Kernel Thinning & 89.89 & 245.74 & 79.85 & 228.81 & 9 \\
+Supervised KT & 86.53 & 246.02 & 78.87 & 221.19 & 9 \\
+SHD (default 26\% band) & 95.08 & 231.01 & 86.11 & 211.91 & 10 \\
+SHD-C (critical-aware band) & 101.15 & 216.57 & 91.26 & 198.42 & 25 \\
+SHD-C + 300-medoid guard & \textbf{85.32} & \textbf{196.02} & 78.92 & \textbf{168.40} & \textbf{29} \\
+\bottomrule
+\end{tabular}
+\vspace{2pt}\footnotesize{The guard row is paired with a 5-seed SHD-C baseline (207.98 / 98.75 / 193.70 / 87.85; rare 25); the 20-seed SHD-C row is shown for reference.}
+\end{table}
+
 \subsection{Bayesian Optimization and Critical Boundary Discovery}
 
 To verify whether SHD crystals provide effective warm-start priors for experimental design, we connect SHD to a Bayesian Optimization loop (Mat\'ern-5/2 Gaussian Process \citep{rasmussen2006gaussian} with Expected Improvement acquisition \citep{jones1998efficient}) searching for the phase-transition pocket in an unseen candidate pool ($N_{\text{pool}} = 3,000$). Coresets are capped at $M = 120$ points (1.2\% of the stream).
@@ -228,8 +256,30 @@ As shown in Table~\ref{tab:bo}, an SHD prior enables immediate discovery: top-20
 We simulate severe domain shift by streaming the non-cuprate superconductivity partition (Domain A) followed by an injection of cuprate high-$T_c$ compounds (Domain B).
 \begin{itemize}
     \item \textbf{Radar Performance:} The Bures--Wasserstein radar achieves $20/20$ shift detections with $0/20$ false positives on stationary streams. Median latency for the 7,300-row Domain B window is $50.2\,\mathrm{ms}$ ($4$--$84\,\mathrm{ms}$ across window sizes); it is not sub-millisecond.
-    \item \textbf{Healing and Memory Retention:} With $45$ injected points and a hard cap of $220$ medoids ($245$ unbounded), Domain B RMSE drops from $57.17\,\mathrm{K}$ to $26.88\,\mathrm{K}$ ($20/20$, $p = 1.9 \times 10^{-6}$). Old-domain performance is not preserved: Domain A degrades from $7.32\,\mathrm{K}$ (pre-heal) to $13.36\,\mathrm{K}$, but remains $7.26\,\mathrm{K}$ better than naive overwrite ($20.62\,\mathrm{K}$; $20/20$, $p = 1.9 \times 10^{-6}$). Healing is therefore a bounded trade-off, not zero forgetting. The post-heal BW distance is $0.465$, still above the $0.085$ alert threshold: one heal does not clear the alert; repeated heals or a domain bank are required.
+    \item \textbf{Healing and Memory Retention:} With $45$ injected points and a hard cap of $220$ medoids ($245$ unbounded), Domain B RMSE drops from $57.17\,\mathrm{K}$ to $26.88\,\mathrm{K}$ ($20/20$, $p = 1.9 \times 10^{-6}$). Old-domain performance is not preserved: Domain A degrades from $7.32\,\mathrm{K}$ (pre-heal) to $13.36\,\mathrm{K}$, but remains $7.26\,\mathrm{K}$ better than naive overwrite ($20.62\,\mathrm{K}$; $20/20$, $p = 1.9 \times 10^{-6}$). Healing is therefore a bounded trade-off, not zero forgetting. The post-heal BW distance is $0.465$, still above the $0.085$ alert threshold; Section~\ref{sec:passport} shows that the default blend can leave \emph{both} domains OOD, that \texttt{passport\_recalibrate=True} accepts the new domain while flagging the old one, and that a \texttt{DomainBank} accepts both.
 \end{itemize}
+
+\subsection{Passport Recalibration and Domain Banks}
+\label{sec:passport}
+
+A single blended passport cannot represent two strongly separated regimes (Table~\ref{tab:passport}). Across 5 seeds on the superconductivity A/B split ($M=200$, 45 injected points), the pre-heal radar accepts A ($BW=0.035$) and flags B ($0.629$). After the default blend, $BW_A=0.203$ and $BW_B=0.458$: \emph{both} domains exceed the 0.085 threshold, so the radar has no calibrated in-distribution domain. Setting \texttt{passport\_recalibrate=True} replaces the passport with the new window's covariance: B is accepted ($0.038$) and A is flagged ($0.497$). A \texttt{DomainBank} with one crystal/passport per regime routes A and B correctly $5/5$ and accepts both $5/5$; it also avoids forgetting by construction. We therefore recommend recalibration only when the old domain will not return, and a domain bank when both regimes remain live.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Passport modes after an A$\to$B heal (superconductivity, 5 seeds, $M=200$; threshold $0.085$). Lower BW is better; ``in'' means below threshold. The bank routes correctly $5/5$ and accepts both domains $5/5$.}
+\label{tab:passport}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Mode} & \textbf{BW on A} & \textbf{BW on B} & \textbf{Decision} \\
+\midrule
+Pre-heal & 0.035 & 0.629 & A in, B out \\
+Blend (default) & 0.203 & 0.458 & both out \\
+Recalibrate & 0.497 & 0.038 & A out, B in \\
+Domain bank (nearest) & $<0.085$ & $<0.085$ & both in \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Hyperparameter Sensitivity and Ablation}
 
@@ -271,7 +321,7 @@ Second, \texttt{phase\_kappa} is the structural constant (removal costs $0.85\,\
 
 \textbf{Trade-off Transparency:} In accordance with empirical honesty, SHD is an engineered trade-off: allocating dedicated Voronoi volume to rare regimes slightly degrades global background modeling ($0.546$ vs $0.425$ for $K$-Means background RMSE in the BO benchmark). Furthermore, on smooth Gaussian data lacking distinct phase transitions, $K$-Means achieves comparable global representation. SHD is specifically designed for multi-scale physical streams where extreme operational modes carry asymmetric utility.
 
-\textbf{Limitations.} (i) The reactor is synthetic; the only real regression dataset is Superconductivity. On a second real stream (Beijing PM2.5, 3\% critical), single-crystal SHD loses global RMSE ($95.1$ vs $89.9$ KT / $88.2$ Random) and only ties KT on critical ($231.0$ vs $245.7$; $13/20$, $p=0.216$); SHD-C plus a 300-medoid global guard recovers $196.0/85.3$ and ties KT on GBM-all ($78.9$), i.e.\ the fix requires a second crystal, not the single-crystal method. (ii) The radar separates strong shifts perfectly (AUC $=1.0$), but graded/noisy shifts are untested. (iii) One heal does not clear the alert ($BW=0.465 > 0.085$); a domain bank or repeated heals are needed. (iv) We provide no coverage guarantee; the method is empirical. (v) The 15-split data-access and stratification controls use a single dataset.
+\textbf{Limitations.} (i) The reactor is synthetic; the second real stream (Beijing PM2.5, 3\% critical, Section~\ref{sec:pm25}) shows that the single-crystal default loses global RMSE, and the fix requires a critical-aware band plus a guard or bank rather than the single-crystal method. (ii) The radar separates strong shifts perfectly (AUC $=1.0$), but graded/noisy shifts are untested. (iii) The default blended passport can leave both domains above threshold; recalibration accepts the new domain but flags the old, and a domain bank accepts both (Section~\ref{sec:passport}). (iv) We provide no coverage guarantee; the method is empirical. (v) The 15-split data-access and stratification controls use a single dataset.
 
 \textbf{Future Directions:} Immediate engineering priorities include compiling the Bures--Wasserstein radar into bare-metal C for ARM Cortex-M microcontrollers, integration with the NASA CMAPSS turbofan degradation benchmark, and deploying SHD within sovereign industrial telemetry pipelines.
 

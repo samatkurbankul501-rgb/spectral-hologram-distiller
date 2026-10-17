@@ -180,6 +180,11 @@ Retention (boost 2, protect_old_weight_frac=0.5): D 17.59, A 14.09 —
 
 ### Domain bank (SHD-Bank): zero forgetting by construction
 
+Реализовано в `shd.DomainBank` (`shd/bank.py`): nearest-passport routing поверх
+нескольких `.hologram.npz`; банк не перезаписывает старые кристаллы. Плюс
+`heal_domain_shift(..., passport_recalibrate=True)` для случая, когда старый домен
+больше не вернётся.
+
 Вместо слияния — отдельный кристалл на домен + radar-router. 4 домена
 (A/B/C/D), M=200 каждый, 5 seeds:
 
@@ -247,6 +252,8 @@ SHD-C: critical_threshold=alarm_threshold, auto_band_ratio=True
 
 - `bench_shdc.py` → `bench_shdc_{superconduct,pm25}_results.json` (20 seeds)
 - `bench_bank.py` → `bench_bank_results.json` (domain bank)
+- `bench_passport.py` → `bench_passport_results.json` (blend / recalibrate / bank)
+- `bench_weights.py` → `bench_weights_*_results.json` (gamma vs uniform)
 - `bench_critical_guard.py` → `bench_critical_guard_results.json`,
   `bench_critical_guard100_results.json`,
   `bench_critical_guard300_results.json`

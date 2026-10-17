@@ -714,11 +714,27 @@ class HologramCrystalLoader:
         # Reconstruct the passport spectral operator from the top-32 eigenpairs.
         self.Psi_passport = (self.eigvecs * self.eigvals) @ self.eigvecs.T
 
-    def get_training_data(self, budget_points: int | None = None):
-        """Return (X, y, sample_weight) for the chosen medoid budget (anytime mode)."""
+    def _select_weights(self, weighting: str) -> np.ndarray:
+        """Return the crystal's gamma weights or uniform weights (mean one)."""
+        if weighting == "gamma":
+            return self.weights
+        if weighting == "uniform":
+            return np.ones_like(self.weights)
+        raise ValueError(f"weighting must be 'gamma' or 'uniform', got {weighting!r}")
+
+    def get_training_data(self, budget_points: int | None = None, weighting: str = "gamma"):
+        """Return (X, y, sample_weight) for the chosen medoid budget (anytime mode).
+
+        ``weighting="gamma"`` (default) returns the FISTA/Voronoi weights;
+        ``weighting="uniform"`` returns ones. The 20-seed ablation in
+        ``bench_weights.py`` shows this is a global/critical trade-off: gamma
+        improves global KRR, while uniform can be better on the critical regime
+        for some datasets (notably the 4D reactor).
+        """
+        w_all = self._select_weights(weighting)
         if budget_points is None or budget_points >= len(self.X):
-            return self.X, self.y, self.weights
-        w_sub = self.weights[:budget_points].copy()
+            return self.X, self.y, w_all
+        w_sub = w_all[:budget_points].copy()
         w_sub /= np.mean(w_sub)
         return self.X[:budget_points], self.y[:budget_points], w_sub
 
@@ -726,6 +742,7 @@ class HologramCrystalLoader:
         self,
         high_band_ratio: float = 0.26,
         y_threshold: float | None = None,
+        weighting: str = "gamma",
     ):
         """Return ``(X_peak, y_peak, w_peak)`` for rare / discontinuity regimes.
 
@@ -738,6 +755,10 @@ class HologramCrystalLoader:
         the most extreme relative to the median for ``tail="both"``. Rows are
         returned in the band's rank order (ascending ``y`` for ``"high"`` /
         ``"low"``, ascending extremeness for ``"both"``).
+
+        ``weighting="gamma"`` (default) returns the crystal's FISTA/Voronoi
+        weights; ``weighting="uniform"`` returns ones for deployments where the
+        critical regime is the only objective (see ``bench_weights.py``).
         """
         if y_threshold is not None:
             mask = self.y >= float(y_threshold)
@@ -749,7 +770,7 @@ class HologramCrystalLoader:
             idx = self._peak_rank_idx(len(self.y), high_band_ratio)
         X_p = self.X[idx].copy()
         y_p = self.y[idx].copy()
-        w_p = self.weights[idx].copy()
+        w_p = self._select_weights(weighting)[idx].copy()
         w_p /= np.mean(w_p)
         return X_p, y_p, w_p
 
@@ -926,6 +947,7 @@ class HologramCrystalLoader:
         passport_blend_min: float = 0.15,
         passport_blend_max: float = 0.50,
         protect_old_weight_frac: float = 0.0,
+        passport_recalibrate: bool = False,
     ) -> dict:
         """Surgical self-healing: inject new Voronoi medoids when OOD shift is detected.
 
@@ -954,6 +976,12 @@ class HologramCrystalLoader:
         heals converge faster on strong drift. ``protect_old_weight_frac``
         additionally protects the top-weight fraction of old medoids from
         pruning (default 0.0), which trades new-domain capacity for retention.
+        ``passport_recalibrate=True`` replaces the passport with the new
+        window's covariance instead of blending it. Subsequent windows from the
+        new domain are then in-distribution, while the old domain is flagged as
+        shifted; use a :class:`~shd.bank.DomainBank` if both domains must be
+        recognized simultaneously. The default ``False`` preserves the blended
+        behavior.
         """
         t0 = time.perf_counter()
         shift = self.check_domain_shift(X_new_stream, distiller_ref=distiller_ref)
@@ -1088,9 +1116,12 @@ class HologramCrystalLoader:
         # the alert (the SC benchmark leaves BW at ~0.465 > 0.085); repeated
         # heals or a domain bank may be needed.
         Psi_new = (U_new.T @ U_new) / max(len(U_new), 1)
-        alpha_blend = min(float(passport_blend_max),
-                          max(float(passport_blend_min),
-                              len(U_new) / (self.n_seen + len(U_new))))
+        if passport_recalibrate:
+            alpha_blend = 1.0
+        else:
+            alpha_blend = min(float(passport_blend_max),
+                              max(float(passport_blend_min),
+                                  len(U_new) / (self.n_seen + len(U_new))))
         Psi_blend = (1.0 - alpha_blend) * self.Psi_passport + alpha_blend * Psi_new
         Psi_blend = 0.5 * (Psi_blend + Psi_blend.T)
         rank_p = len(self.eigvals)

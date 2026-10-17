@@ -1,0 +1,217 @@
+{
+ "dataset": "UCI Superconductivity",
+ "n_seeds": 5,
+ "crystal_size": 200,
+ "records": [
+  {
+   "seed": 0,
+   "pre": {
+    "A": 0.03511244236949778,
+    "B": 0.6457285480470548,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "blend": {
+    "A": 0.21016734082369595,
+    "B": 0.4709620461591446,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "recalibrate": {
+    "A": 0.5101375388180545,
+    "B": 0.03817120149971462,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "bank": {
+    "domain_A": 0,
+    "domain_B": 1,
+    "shifted_A": false,
+    "shifted_B": false
+   },
+   "heal": {
+    "healed": true,
+    "n_injected": 45,
+    "n_pruned": 25,
+    "bw_after": 0.4777886083452893
+   },
+   "recal_heal": {
+    "healed": true,
+    "n_injected": 45,
+    "n_pruned": 25,
+    "bw_after": 5.476212217579308e-06
+   }
+  },
+  {
+   "seed": 1,
+   "pre": {
+    "A": 0.035564697387011755,
+    "B": 0.6293001136857747,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "blend": {
+    "A": 0.2029989201042258,
+    "B": 0.4582917666019461,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "recalibrate": {
+    "A": 0.49220928785226414,
+    "B": 0.036392219017223816,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "bank": {
+    "domain_A": 0,
+    "domain_B": 1,
+    "shifted_A": false,
+    "shifted_B": false
+   },
+   "heal": {
+    "healed": true,
+    "n_injected": 45,
+    "n_pruned": 25,
+    "bw_after": 0.4643474368613058
+   },
+   "recal_heal": {
+    "healed": true,
+    "n_injected": 45,
+    "n_pruned": 25,
+    "bw_after": 5.637170530438203e-06
+   }
+  },
+  {
+   "seed": 2,
+   "pre": {
+    "A": 0.03589240613351857,
+    "B": 0.6393323690418118,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "blend": {
+    "A": 0.20945894841510806,
+    "B": 0.4655076276700275,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "recalibrate": {
+    "A": 0.5052211677517902,
+    "B": 0.03745613079791189,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "bank": {
+    "domain_A": 0,
+    "domain_B": 1,
+    "shifted_A": false,
+    "shifted_B": false
+   },
+   "heal": {
+    "healed": true,
+    "n_injected": 45,
+    "n_pruned": 25,
+    "bw_after": 0.47076731522606985
+   },
+   "recal_heal": {
+    "healed": true,
+    "n_injected": 45,
+    "n_pruned": 25,
+    "bw_after": 5.31265581198572e-06
+   }
+  },
+  {
+   "seed": 3,
+   "pre": {
+    "A": 0.03465950709347481,
+    "B": 0.6118873220463605,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "blend": {
+    "A": 0.2015928395953703,
+    "B": 0.44850298637364117,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "recalibrate": {
+    "A": 0.4747324699975873,
+    "B": 0.03751741752574556,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "bank": {
+    "domain_A": 0,
+    "domain_B": 1,
+    "shifted_A": false,
+    "shifted_B": false
+   },
+   "heal": {
+    "healed": true,
+    "n_injected": 45,
+    "n_pruned": 25,
+    "bw_after": 0.4538994757812205
+   },
+   "recal_heal": {
+    "healed": true,
+    "n_injected": 45,
+    "n_pruned": 25,
+    "bw_after": 5.336384406789895e-06
+   }
+  },
+  {
+   "seed": 4,
+   "pre": {
+    "A": 0.03546224563131028,
+    "B": 0.6168629902068382,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "blend": {
+    "A": 0.20325744986340133,
+    "B": 0.4496638852663301,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "recalibrate": {
+    "A": 0.4967136210402849,
+    "B": 0.03859946125060914,
+    "threshold_A": 0.085,
+    "threshold_B": 0.085
+   },
+   "bank": {
+    "domain_A": 0,
+    "domain_B": 1,
+    "shifted_A": false,
+    "shifted_B": false
+   },
+   "heal": {
+    "healed": true,
+    "n_injected": 45,
+    "n_pruned": 25,
+    "bw_after": 0.45479310337631174
+   },
+   "recal_heal": {
+    "healed": true,
+    "n_injected": 45,
+    "n_pruned": 25,
+    "bw_after": 5.41445538753871e-06
+   }
+  }
+ ],
+ "summary": {
+  "pre_B": 0.6293001136857747,
+  "pre_A": 0.03546224563131028,
+  "blend_B": 0.4582917666019461,
+  "blend_A": 0.20325744986340133,
+  "recal_B": 0.03751741752574556,
+  "recal_A": 0.4967136210402849,
+  "blend_B_above": 5,
+  "blend_A_above": 5,
+  "recal_B_below": 5,
+  "recal_A_above": 5,
+  "bank_route_correct": 5,
+  "bank_accepted_both": 5
+ },
+ "elapsed_sec": 19.178158200003963
+}

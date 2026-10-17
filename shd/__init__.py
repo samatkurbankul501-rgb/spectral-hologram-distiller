@@ -1,2 +1,5 @@
 from .distiller import SpectralHologramDistiller, HologramCrystalLoader
-__version__ = "3.9.2"
+from .bank import DomainBank
+
+__version__ = "3.10.0"
+__all__ = ["SpectralHologramDistiller", "HologramCrystalLoader", "DomainBank"]

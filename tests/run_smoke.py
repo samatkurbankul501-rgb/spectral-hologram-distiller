@@ -45,6 +45,7 @@ def main() -> int:
         "test_delta_width_ambiguity_is_rejected",
         "test_cli_npz_target_col",
         "test_golden_crystal_numbers",
+        "test_domain_bank_routes_and_accepts_both",
     }
     test_names = [
         "test_version",
@@ -59,6 +60,9 @@ def main() -> int:
         "test_adaptive_threshold_and_small_batch",
         "test_heal_max_crystal_size_prunes_background",
         "test_heal_max_crystal_size_is_hard_cap",
+        "test_heal_passport_recalibrate_accepts_new_domain",
+        "test_loader_weighting_option",
+        "test_domain_bank_routes_and_accepts_both",
         "test_cli_npz_target_col",
         "test_golden_crystal_numbers",
         "test_include_deltas_streaming_augmentation",

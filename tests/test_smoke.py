@@ -18,7 +18,7 @@ except ImportError:  # dependency-free mode: run via tests/run_smoke.py
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shd import HologramCrystalLoader, SpectralHologramDistiller, __version__  # noqa: E402
+from shd import DomainBank, HologramCrystalLoader, SpectralHologramDistiller, __version__  # noqa: E402
 
 
 def make_stream(n=6000, seed=7):
@@ -92,7 +92,7 @@ def _fit_crystal(X, y, tail, crystal_size=80, seed=3):
 
 
 def test_version():
-    assert __version__ == "3.9.2"
+    assert __version__ == "3.10.0"
 
 
 def test_distiller_shapes(distilled):
@@ -375,6 +375,89 @@ def test_heal_max_crystal_size_is_hard_cap(distilled):
     else:
         raise AssertionError("expected ValueError for an unsatisfiable max_crystal_size")
     assert len(loader2.X) == 80
+
+
+def test_heal_passport_recalibrate_accepts_new_domain(distilled):
+    """Blend leaves the new domain above threshold; recalibrate accepts it.
+
+    The default blend trades old/new passport mass, so a strong shift can leave
+    *both* domains OOD. ``passport_recalibrate=True`` replaces the passport with
+    the new window's covariance, making the new domain in-distribution at the
+    cost of flagging the old one (use DomainBank when both must be accepted).
+    """
+    _, path, _, _ = distilled
+    X_in, y_in = make_stream(n=1200, seed=66)
+    X_shift = X_in.copy()
+    X_shift[:, 0:2] = X_shift[:, 0:2] * 1.8 + 1.6
+
+    blended = HologramCrystalLoader(path)
+    res_blend = blended.heal_domain_shift(
+        X_shift, y_in + 8.0, n_inject=25, random_state=6
+    )
+    thr = blended.check_domain_shift(X_shift)["threshold"]
+    assert res_blend["bw_after"] > thr
+
+    recalibrated = HologramCrystalLoader(path)
+    res = recalibrated.heal_domain_shift(
+        X_shift, y_in + 8.0, n_inject=25, passport_recalibrate=True, random_state=6
+    )
+    thr_recal = recalibrated.check_domain_shift(X_shift)["threshold"]
+    assert res["bw_after"] < thr_recal
+
+
+def test_loader_weighting_option(distilled):
+    """``weighting='uniform'`` returns ones; ``gamma`` keeps the FISTA weights."""
+    _, path, _, _ = distilled
+    loader = HologramCrystalLoader(path)
+    _, _, w_gamma = loader.get_training_data(weighting="gamma")
+    _, _, w_uniform = loader.get_training_data(weighting="uniform")
+    assert np.allclose(w_gamma.mean(), 1.0)
+    assert np.allclose(w_uniform, 1.0)
+    assert not np.allclose(w_gamma, w_uniform)
+
+    _, _, w_budget = loader.get_training_data(budget_points=20, weighting="uniform")
+    assert len(w_budget) == 20 and np.allclose(w_budget, 1.0)
+
+    X_peak, _, w_peak = loader.get_phase_peak_slice(weighting="uniform")
+    assert len(X_peak) > 0 and np.allclose(w_peak, 1.0)
+
+    try:
+        loader.get_training_data(weighting="bogus")
+    except ValueError as exc:
+        assert "weighting" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for an unknown weighting")
+
+
+def test_domain_bank_routes_and_accepts_both():
+    """A two-crystal bank routes each regime to its own passport."""
+    tmp = tempfile.mkdtemp(prefix="shd_bank_")
+    X0, y0 = make_stream(n=3000, seed=5)
+    X1 = X0 * 2.5 + 5.0
+    y1 = y0 * 1.5 + 2.0
+    paths = []
+    for i, (X, y) in enumerate([(X0, y0), (X1, y1)]):
+        d = SpectralHologramDistiller(
+            crystal_size=60, sketch_dim=64, random_state=10 + i
+        )
+        for j in range(0, len(X), 750):
+            d.partial_fit(X[j : j + 750], y[j : j + 750])
+        d.finalize_crystal()
+        path = os.path.join(tmp, f"domain_{i}.hologram.npz")
+        d.save_hologram(path)
+        paths.append(path)
+
+    bank = DomainBank(paths)
+    r0 = bank.check_domain_shift(X0[:200])
+    r1 = bank.check_domain_shift(X1[:200])
+    assert r0["domain_index"] == 0 and r0["is_shifted"] is False
+    assert r1["domain_index"] == 1 and r1["is_shifted"] is False
+    assert bank.select(X1[:200]) is bank[1]
+    assert len(bank) == 2
+
+    # A single A-only crystal must flag the second regime.
+    single = HologramCrystalLoader(paths[0])
+    assert single.check_domain_shift(X1[:200])["is_shifted"] is True
 
 
 def test_cli_npz_target_col():

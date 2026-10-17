@@ -1,7 +1,9 @@
-# Spectral Hologram Distiller (SHD v3.9.2)
+# Spectral Hologram Distiller (SHD v3.10.0)
 
-> **v3.9.2 patch:** hard `max_crystal_size` contract (raises instead of silently
-> overshooting), NPZ `--target-col` support, golden regression test, and an MIT LICENSE.
+> **v3.10.0:** `DomainBank` (per-domain crystals + nearest-passport routing),
+> `passport_recalibrate=True` for single-crystal heals, `weighting="uniform"` on
+> the loader, PM2.5 section; plus the v3.9.2 hard cap, NPZ `--target-col`,
+> golden regression test, and MIT LICENSE.
 
 **Zero-GPU streaming dataset distillation with phase-manifold Voronoi medoids, kernel-herding spectral weights, and a 16-bit spectral-passport OOD radar.**
 
@@ -54,6 +56,16 @@ print(report)  # {'bw_distance': ..., 'latency_ms': ..., 'is_shifted': False}
 # Surgical self-healing when a new regime arrives (bounded forgetting):
 heal_info = loader.heal_domain_shift(X_drifted, y_drifted, n_inject=35)
 loader.save("my_crystal_healed.hologram.npz")
+
+# Accept the new domain explicitly (the old domain will be flagged):
+# loader.heal_domain_shift(..., passport_recalibrate=True)
+# Or keep both domains in-distribution with a bank:
+# from shd import DomainBank
+# bank = DomainBank(["a.hologram.npz", "b.hologram.npz"])
+
+# Per-deployment weighting (see bench_weights_*):
+X_g, y_g, w_g = loader.get_training_data(weighting="gamma")    # default
+X_u, y_u, w_u = loader.get_training_data(weighting="uniform")  # critical-only
 ```
 
 ## CLI (`python -m shd` / `shd`)
@@ -99,7 +111,7 @@ python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-c
    Bures-Wasserstein distance on a 32-dim subspace (base threshold 0.085,
    auto-calibrated to batch size — see below), plus
    `loader.heal_domain_shift(...)` to surgically inject new Voronoi medoids and
-   blend the spectral passport without touching old medoids.
+   blend the spectral passport (old medoids are kept unless a `max_crystal_size` cap prunes low-weight cells).
 
 ## Industrial hardening (v3.7.1)
 
@@ -310,12 +322,17 @@ truth: `bench_heal_superconduct_results.json` (20 seeds, paired Wilcoxon).
 | :--- | :--- | :--- |
 | False alarms on in-distribution Domain A | BW = 0.035 vs threshold 0.085 | **0/20** |
 | OOD detections on Domain B (cuprates) | BW = 0.636 | **20/20** |
-| Post-heal BW on Domain B | 0.465 | passport blends toward the new domain (0.636 → 0.465); one heal does **not** yet clear the 0.085 alert threshold |
+| Post-heal BW on Domain B | 0.465 | default blend leaves both A (0.203) and B (0.458) above 0.085; `passport_recalibrate=True` gives B 0.038 / A 0.497; `DomainBank` accepts both |
 | KRR RMSE on new Domain B | **26.88 K** healed vs **57.17 K** pre-heal | 20/20, $p=1.9\times10^{-6}$ |
 | GBM RMSE on new Domain B | **19.38 K** vs **54.57 K** | 20/20, $p=1.9\times10^{-6}$ |
 | Old Domain A retention vs naive overwrite | KRR **13.36 K** vs **20.62 K** | 20/20, $p=1.9\times10^{-6}$ |
 | Combined A+B vs pre-heal / naive overwrite | **19.10 K** vs 33.86 / 21.58 | 20/20 both |
 | Bounded heal (`max_crystal_size=220`) | combined **19.15 K** vs 33.86 | 20/20 — size control costs ≈ nothing |
+
+Passport modes (5 seeds, `bench_passport_results.json`): pre-heal A 0.035 / B 0.629;
+blend A 0.203 / B 0.458 (both OOD); recalibrate A 0.497 / B 0.038 (new in, old
+flagged); bank routes 5/5 and accepts both 5/5. Use recalibration only if the old
+domain will not return; use a bank when both regimes remain live.
 
 Headline: on a physically meaningful shift (low-$T_c$ iron-based → cuprate
 superconductors) the naive response is either blindness (RMSE 57 K) or catastrophic
@@ -352,6 +369,12 @@ their own Voronoi cells. Recommendation: enable it only for transient-dominated
 telemetry; the default remains `False`.
 
 ## Known limitations
+
+- **Single-passport healing is a three-way trade-off:** the default blend can
+  leave *both* domains uncalibrated on a strong shift; `passport_recalibrate=True`
+  accepts the new domain but flags the old; `DomainBank` accepts both at the cost
+  of one crystal per domain. See `bench_passport_results.json`.
+
 
 - **Deliberate background trade-off:** reserving 26% of medoid cells for the
   phase-peak band slightly increases background GP RMSE (`0.546` vs `0.425` on
