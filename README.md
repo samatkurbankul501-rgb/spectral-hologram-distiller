@@ -183,8 +183,8 @@ phase-transition pocket = 12 points / 0.40% volume):
 
 | Coreset feeding GP+EI ($M=120$) | GP RMSE inside Phase Pocket (med / IQR) | Top-20 EI Hits in Pocket out of 12 (med / IQR) | 10-step BO Simple Regret (med / IQR) | GP RMSE All Background (med / IQR) |
 | :--- | :---: | :---: | :---: | :---: |
-| **Random (1.2%)** | 6.028 / 0.684 | 0.0 / 2.2 | 1.783 / 5.249 | 0.437 / 0.067 |
-| **K-Means (1.2%)** | 6.073 / 0.144 | 0.0 / 0.2 | 5.578 / 5.317 | **0.425 / 0.056** |
+| **Random (1.2%)** | 6.028 / 0.591 | 0.0 / 2.25 | 1.783 / 5.304 | 0.437 / 0.127 |
+| **K-Means (1.2%)** | 6.073 / 0.238 | 0.0 / 0.5 | 5.578 / 5.200 | **0.425 / 0.087** |
 | **SHD v3.7 (1.2%)** | **4.164 / 0.693** | **6.0 / 2.0** | **0.099 / 0.266** | 0.546 / 0.031 |
 | *Wilcoxon SHD vs Random* | 20/20 wins, $p=1.9\times 10^{-6}$ | 19/20 wins, $p=1.0\times 10^{-4}$ | 16/20 wins, $p=5.9\times 10^{-4}$ | 6/20, $p=0.0073$ (trade-off) |
 | *Wilcoxon SHD vs K-Means* | 19/20 wins, $p=9.5\times 10^{-6}$ | 19/20 wins, $p=1.1\times 10^{-4}$ | 18/20 wins, $p=3.4\times 10^{-4}$ | 3/20, $p=1.7\times 10^{-4}$ (trade-off) |
@@ -203,8 +203,8 @@ permutation detector (`discover_phase_boundary_cpd(use_rank=True, alpha=0.01)`):
 
 | Coreset feeding CPD-rank ($M=120$) | Planted Phase Points Captured (med / IQR) | CPD-rank F1 (med / IQR) | Verified Detections ($p < 0.01 \land \text{F1} \ge 0.5$) | Boundary Error $\Delta A$ (med / IQR) | Boundary Error $\Delta T$ (med / IQR) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Random (1.5%)** | 3.0 / 1.2 | 0.038 / 0.145 | 1 / 20 (5%) | 0.200 / 0.231 | 105.0 / 157.5 K |
-| **K-Means (1.5%)** | 5.0 / 2.0 | 0.171 / 0.460 | 4 / 20 (20%) | 0.163 / 0.206 | 105.0 / 87.5 K |
+| **Random (1.5%)** | 3.0 / 2.0 | 0.038 / 0.138 | 1 / 20 (5%) | 0.200 / 0.138 | 105.0 / 153.1 K |
+| **K-Means (1.5%)** | 5.0 / 2.0 | 0.171 / 0.439 | 4 / 20 (20%) | 0.163 / 0.194 | 105.0 / 105.0 K |
 | **SHD v3.7 (1.5%)** | **10.0 / 3.0** | **1.000 / 0.000** | **18 / 20 (90%)** | **0.050 / 0.025** | **43.8 / 52.5 K** |
 | *Wilcoxon SHD vs Random* | 20/20 wins, $p=8.3\times 10^{-5}$ | 17/20 wins, $p=2.5\times 10^{-4}$ | **18/20 vs 1/20** | 17/20 wins, $p=3.3\times 10^{-4}$ | 16/20 wins, $p=1.5\times 10^{-3}$ |
 | *Wilcoxon SHD vs K-Means* | 20/20 wins, $p=8.3\times 10^{-5}$ | 15/20 wins, $p=3.6\times 10^{-3}$ | **18/20 vs 4/20** | 15/20 wins, $p=8.0\times 10^{-3}$ | 14/20 wins, $p=2.8\times 10^{-3}$ |
