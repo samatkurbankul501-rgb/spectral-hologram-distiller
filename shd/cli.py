@@ -1,4 +1,4 @@
-"""Command-line interface for Spectral Hologram Distiller (SHD v3.7).
+"""Command-line interface for Spectral Hologram Distiller (SHD v3.9.1).
 
 Usage examples:
     python -m shd inspect artifacts/superconduct_v37.hologram.npz
@@ -31,10 +31,14 @@ def _load_tabular(path: str, target_col: int | None = None, delimiter: str | Non
         if "X" in data.files:
             X_raw = data["X"].astype(np.float64)
             y_raw = data["y"].astype(np.float64) if "y" in data.files else None
-            return X_raw, y_raw
-        first_key = data.files[0]
-        X_raw = data[first_key].astype(np.float64)
-        y_raw = None
+            # An explicit y array takes precedence over --target-col. Only fall
+            # through to the target-column split when the NPZ has no y.
+            if y_raw is not None or target_col is None:
+                return X_raw, y_raw
+        else:
+            first_key = data.files[0]
+            X_raw = data[first_key].astype(np.float64)
+            y_raw = None
     else:
         sep = delimiter if delimiter is not None else ("," if ext != ".tsv" else "\t")
         with open(path, "r", encoding="utf-8") as f:
@@ -51,6 +55,8 @@ def _load_tabular(path: str, target_col: int | None = None, delimiter: str | Non
             X_raw = X_raw[:, None]
         y_raw = None
 
+    if X_raw.ndim == 1:
+        X_raw = X_raw[:, None]
     if target_col is not None and y_raw is None:
         idx = target_col if target_col >= 0 else (X_raw.shape[1] + target_col)
         if idx < 0 or idx >= X_raw.shape[1]:
@@ -63,7 +69,9 @@ def _load_tabular(path: str, target_col: int | None = None, delimiter: str | Non
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
-    loader = HologramCrystalLoader(args.crystal)
+    loader = HologramCrystalLoader(
+        args.crystal, include_deltas=True if args.include_deltas else None
+    )
     info = loader.summary()
     print(json.dumps(info, indent=2))
     return 0
@@ -103,7 +111,9 @@ def cmd_distill(args: argparse.Namespace) -> int:
 
 
 def cmd_radar(args: argparse.Namespace) -> int:
-    loader = HologramCrystalLoader(args.crystal)
+    loader = HologramCrystalLoader(
+        args.crystal, include_deltas=True if args.include_deltas else None
+    )
     X, _ = _load_tabular(args.input, target_col=args.target_col)
     report = loader.check_domain_shift(X, streaming=args.streaming)
     print(json.dumps(report, indent=2))
@@ -111,7 +121,9 @@ def cmd_radar(args: argparse.Namespace) -> int:
 
 
 def cmd_heal(args: argparse.Namespace) -> int:
-    loader = HologramCrystalLoader(args.crystal)
+    loader = HologramCrystalLoader(
+        args.crystal, include_deltas=True if args.include_deltas else None
+    )
     X, y = _load_tabular(args.input, target_col=args.target_col)
     res = loader.heal_domain_shift(
         X,
@@ -133,11 +145,15 @@ def cmd_heal(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="shd", description="Spectral Hologram Distiller (SHD v3.7) CLI")
+    p = argparse.ArgumentParser(prog="shd", description="Spectral Hologram Distiller (SHD v3.9.1) CLI")
     sub = p.add_subparsers(dest="command", required=True)
 
     p_ins = sub.add_parser("inspect", help="Inspect a .hologram.npz crystal")
     p_ins.add_argument("crystal", help="Path to .hologram.npz file")
+    p_ins.add_argument(
+        "--include-deltas", action="store_true",
+        help="Treat a legacy (pre-3.9.1) artifact as a delta crystal",
+    )
     p_ins.set_defaults(func=cmd_inspect)
 
     p_dis = sub.add_parser("distill", help="Distill a CSV/NPY/NPZ dataset into a .hologram.npz crystal")
@@ -175,6 +191,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--streaming", action="store_true",
         help="Delta crystals: continue first differences from the previous radar call",
     )
+    p_rad.add_argument(
+        "--include-deltas", action="store_true",
+        help="Treat a legacy (pre-3.9.1) artifact as a delta crystal",
+    )
     p_rad.set_defaults(func=cmd_radar)
 
     p_heal = sub.add_parser("heal", help="Surgically inject new Voronoi medoids on domain shift")
@@ -186,6 +206,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_heal.add_argument("--max-crystal-size", type=int, default=None, help="Cap total crystal size by pruning low-weight background medoids")
     p_heal.add_argument("--force", action="store_true")
     p_heal.add_argument("--streaming", action="store_true", help="Delta crystals: continue first differences from the previous call")
+    p_heal.add_argument(
+        "--include-deltas", action="store_true",
+        help="Treat a legacy (pre-3.9.1) artifact as a delta crystal",
+    )
     p_heal.add_argument("--seed", type=int, default=42)
     p_heal.set_defaults(func=cmd_heal)
 

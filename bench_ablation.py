@@ -33,6 +33,7 @@ DEFAULTS = dict(
     omega_low_scale=0.75,
     omega_high_scale=2.10,
     tail_quantile=84.0,
+    use_residual=True,
 )
 
 # one-at-a-time grids (value lists always include the default)
@@ -46,6 +47,7 @@ GRIDS = {
     "omega_low_scale": [0.35, 0.75, 1.50],
     "omega_high_scale": [0.75, 2.10, 4.20],
     "tail_quantile": [74.0, 84.0, 94.0],
+    "use_residual": [True, False],
 }
 
 
@@ -95,6 +97,7 @@ def run(dataset, seeds, m):
                 row[metric + "_median"] = float(np.median(vals))
                 row[metric + "_iqr"] = float(np.percentile(vals, 75) - np.percentile(vals, 25))
             row["elapsed_sec"] = time.perf_counter() - t0
+            row["records"] = recs
             rows.append(row)
             print(f"[{dataset}] {const}={val}: crit={row['krr_rmse_crit_median']:.3f} "
                   f"all={row['krr_rmse_all_median']:.3f} rare={row['rare_captured_median']:.0f} "

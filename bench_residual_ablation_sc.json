@@ -1,0 +1,146 @@
+{
+ "superconduct": {
+  "dataset": "superconduct",
+  "title": "UCI Superconductivity",
+  "n_seeds": 5,
+  "crystal_size": 300,
+  "defaults": {
+   "phase_kappa": 3.2,
+   "high_band_ratio": 0.26,
+   "voronoi_temper": 0.55,
+   "herding_mix": 0.75,
+   "center_lr": 0.25,
+   "fista_l2_reg": 0.2,
+   "omega_low_scale": 0.75,
+   "omega_high_scale": 2.1,
+   "tail_quantile": 84.0,
+   "use_residual": true
+  },
+  "sweeps": {
+   "use_residual": [
+    {
+     "value": true,
+     "krr_rmse_crit_median": 19.138536665887507,
+     "krr_rmse_crit_iqr": 0.5009263349153805,
+     "krr_rmse_all_median": 15.366412358998412,
+     "krr_rmse_all_iqr": 0.14260399460013495,
+     "gbm_rmse_crit_median": 20.50544800211251,
+     "gbm_rmse_crit_iqr": 2.906409811727986,
+     "gbm_rmse_all_median": 16.473699384531415,
+     "gbm_rmse_all_iqr": 1.243844905950965,
+     "rare_captured_median": 64.0,
+     "rare_captured_iqr": 2.0,
+     "elapsed_sec": 31.103165200001968,
+     "records": [
+      {
+       "krr_rmse_all": 15.397782586823379,
+       "krr_rmse_crit": 19.138536665887507,
+       "krr_r2": 0.794026813867049,
+       "gbm_rmse_all": 16.473699384531415,
+       "gbm_rmse_crit": 20.50544800211251,
+       "gbm_r2": 0.7642364871320333,
+       "rare_captured": 60
+      },
+      {
+       "krr_rmse_all": 15.508978385030774,
+       "krr_rmse_crit": 19.408322095114773,
+       "krr_r2": 0.7910411824591482,
+       "gbm_rmse_all": 17.629086151120827,
+       "gbm_rmse_crit": 24.731375831760936,
+       "gbm_r2": 0.730006119500262,
+       "rare_captured": 64
+      },
+      {
+       "krr_rmse_all": 15.366412358998412,
+       "krr_rmse_crit": 19.204453574489072,
+       "krr_r2": 0.7948652259875989,
+       "gbm_rmse_all": 17.457040023671226,
+       "gbm_rmse_crit": 21.65346089701491,
+       "gbm_r2": 0.735250263916908,
+       "rare_captured": 64
+      },
+      {
+       "krr_rmse_all": 15.249093374159013,
+       "krr_rmse_crit": 18.212260476875464,
+       "krr_r2": 0.7979855813378263,
+       "gbm_rmse_all": 16.21319511772026,
+       "gbm_rmse_crit": 17.76386078220408,
+       "gbm_r2": 0.771633950495762,
+       "rare_captured": 68
+      },
+      {
+       "krr_rmse_all": 15.255178592223244,
+       "krr_rmse_crit": 18.703527239573692,
+       "krr_r2": 0.7978243196760784,
+       "gbm_rmse_all": 16.003267749947597,
+       "gbm_rmse_crit": 18.747051085286923,
+       "gbm_r2": 0.7775094018820414,
+       "rare_captured": 62
+      }
+     ]
+    },
+    {
+     "value": false,
+     "krr_rmse_crit_median": 17.960575083722098,
+     "krr_rmse_crit_iqr": 0.28716282469870436,
+     "krr_rmse_all_median": 15.776570950918327,
+     "krr_rmse_all_iqr": 0.14250157296649135,
+     "gbm_rmse_crit_median": 17.133958919900422,
+     "gbm_rmse_crit_iqr": 0.3133656307710986,
+     "gbm_rmse_all_median": 16.494187265091718,
+     "gbm_rmse_all_iqr": 0.731134715283897,
+     "rare_captured_median": 66.0,
+     "rare_captured_iqr": 4.0,
+     "elapsed_sec": 35.5801580000043,
+     "records": [
+      {
+       "krr_rmse_all": 15.78412530537912,
+       "krr_rmse_crit": 17.83861450880892,
+       "krr_r2": 0.7835610788059502,
+       "gbm_rmse_all": 16.842273224608086,
+       "gbm_rmse_crit": 16.988706592098133,
+       "gbm_r2": 0.7535687740990056,
+       "rare_captured": 63
+      },
+      {
+       "krr_rmse_all": 15.776570950918327,
+       "krr_rmse_crit": 18.125777333507624,
+       "krr_r2": 0.7837682065403633,
+       "gbm_rmse_all": 16.885814106991592,
+       "gbm_rmse_crit": 17.30207222286923,
+       "gbm_r2": 0.7522929721526574,
+       "rare_captured": 66
+      },
+      {
+       "krr_rmse_all": 15.841025840909985,
+       "krr_rmse_crit": 18.788055922202293,
+       "krr_r2": 0.7819977753632356,
+       "gbm_rmse_all": 15.588385948851018,
+       "gbm_rmse_crit": 17.133958919900422,
+       "gbm_r2": 0.7888959232511096,
+       "rare_captured": 61
+      },
+      {
+       "krr_rmse_all": 15.64162373241263,
+       "krr_rmse_crit": 17.410569474181848,
+       "krr_r2": 0.7874515268230724,
+       "gbm_rmse_all": 16.11113850932419,
+       "gbm_rmse_crit": 16.576658224428254,
+       "gbm_r2": 0.7744998768933302,
+       "rare_captured": 67
+      },
+      {
+       "krr_rmse_all": 15.290159543688288,
+       "krr_rmse_crit": 17.960575083722098,
+       "krr_r2": 0.7968960570275652,
+       "gbm_rmse_all": 16.494187265091718,
+       "gbm_rmse_crit": 19.66477118888078,
+       "gbm_r2": 0.7636496974582987,
+       "rare_captured": 69
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

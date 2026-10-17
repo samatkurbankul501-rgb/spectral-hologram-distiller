@@ -40,6 +40,11 @@ def main() -> int:
         "test_heal_protects_low_tail_band",
         "test_input_validation_and_degenerate_data",
         "test_architecture_constants_are_wired",
+        "test_partial_fit_copies_input_buffers",
+        "test_mode_switch_is_rejected",
+        "test_delta_width_ambiguity_is_rejected",
+        "test_cli_npz_target_col",
+        "test_golden_crystal_numbers",
     }
     test_names = [
         "test_version",
@@ -53,6 +58,9 @@ def main() -> int:
         "test_loader_save_and_cli_commands",
         "test_adaptive_threshold_and_small_batch",
         "test_heal_max_crystal_size_prunes_background",
+        "test_heal_max_crystal_size_is_hard_cap",
+        "test_cli_npz_target_col",
+        "test_golden_crystal_numbers",
         "test_include_deltas_streaming_augmentation",
         "test_two_tailed_trigger",
         "test_adaptive_y_stats",
@@ -60,6 +68,9 @@ def main() -> int:
         "test_heal_protects_low_tail_band",
         "test_input_validation_and_degenerate_data",
         "test_architecture_constants_are_wired",
+        "test_partial_fit_copies_input_buffers",
+        "test_mode_switch_is_rejected",
+        "test_delta_width_ambiguity_is_rejected",
     ]
     failures = []
     for name in test_names:

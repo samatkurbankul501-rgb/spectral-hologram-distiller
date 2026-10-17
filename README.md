@@ -1,4 +1,7 @@
-# Spectral Hologram Distiller (SHD v3.8)
+# Spectral Hologram Distiller (SHD v3.9.2)
+
+> **v3.9.2 patch:** hard `max_crystal_size` contract (raises instead of silently
+> overshooting), NPZ `--target-col` support, golden regression test, and an MIT LICENSE.
 
 **Zero-GPU streaming dataset distillation with phase-manifold Voronoi medoids, kernel-herding spectral weights, and a 16-bit spectral-passport OOD radar.**
 
@@ -48,7 +51,7 @@ print(report)  # {'bw_distance': ..., 'latency_ms': ..., 'is_shifted': False}
 # Delta crystals can carry first differences across radar calls:
 # loader.check_domain_shift(X_new_stream, streaming=True)
 
-# Surgical self-healing when a new regime arrives (zero catastrophic forgetting):
+# Surgical self-healing when a new regime arrives (bounded forgetting):
 heal_info = loader.heal_domain_shift(X_drifted, y_drifted, n_inject=35)
 loader.save("my_crystal_healed.hologram.npz")
 ```
@@ -162,7 +165,7 @@ the previous commit: identical crystals, weights, slices and radar distances).
 
 | Constant | Values swept | Critical RMSE | Reading |
 | :--- | :--- | :--- | :--- |
-| `phase_kappa` | 0.0 / 1.6 / **3.2** / 6.4 | 4.199 / 3.236 / **3.346** / 3.404 | $\kappa=0$ (no phase manifold) is the worst by a wide margin — the phase geometry is the load-bearing idea, not decoration |
+| `phase_kappa` | 0.0 / 1.6 / **3.2** / 6.4 | 4.199 / 3.236 / **3.346** / 3.404 | $\kappa=0$ (no phase manifold) is a large degradation, but a too-narrow band (0.10) is worse (4.433); the phase geometry is load-bearing, not decoration |
 | `high_band_ratio` | 0.10 / **0.26** / 0.50 | 4.433 / **3.346** / 2.718 | most sensitive knob; reserving more volume for the phase band keeps helping on this stream |
 | `tail_quantile` | 74 / **84** / 94 | 3.667 / **3.346** / 2.739 | a stricter trigger (94th pct) captures 43 rare points vs 18 |
 | `voronoi_temper` | 0.0 / 0.30 / **0.55** / 1.0 | 3.200 / 3.266 / **3.346** / 3.518 | flat-ish optimum; raw cell volumes (1.0) are the worst |
@@ -212,7 +215,7 @@ SHD captures a median of **64.5** (IQR 3.5) high-$T_c$ superconductors out of 30
 
 | Coreset ($M=300$) | KRR RMSE All (med / IQR) | KRR RMSE $T_c \ge 77\text{K}$ (med / IQR) | KRR $R^2$ (med / IQR) | GBM RMSE All (med / IQR) | GBM RMSE $T_c \ge 77\text{K}$ (med / IQR) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Oracle (full train)** | 12.86 K | 17.59 K | 0.8562 | 10.27 K | 12.72 K |
+| **Oracle (KRR 9,000; GBM full train)** | 12.86 K | 17.59 K | 0.8562 | 10.27 K | 12.72 K |
 | **Random (1.76%)** | 16.58 / 0.54 K | 22.43 / 2.49 K | 0.761 / 0.015 | 16.38 / 0.84 K | 22.57 / 2.49 K |
 | **K-Means (1.76%)** | 17.34 / 0.55 K | 22.93 / 3.18 K | 0.739 / 0.017 | 17.19 / 0.97 K | 23.15 / 2.47 K |
 | **Kernel Thinning (KT)** | 16.47 / 0.46 K | 23.26 / 2.23 K | 0.764 / 0.013 | 16.55 / 1.05 K | 22.25 / 2.37 K |
@@ -235,7 +238,7 @@ bandwidth, split kernel at `var/2`, swap kernel at `var`, the author's default
 exactly $M=300$ output. Honest reading: on the critical regime
 ($T_c \ge 77\,\mathrm{K}$) SHD beats KT **20/20 seeds** ($23.26 \to 18.81\,\mathrm{K}$)
 and SKT **20/20** ($21.20 \to 18.81\,\mathrm{K}$), both at $p=1.9\times10^{-6}$, and
-captures $64.5$ critical superconductors per crystal vs $56.0$ (KT) and $55.5$
+captures $64.5$ critical superconductors per crystal vs $59.0$ (KT) and $55.0$
 (SKT). SKT is the strongest baseline on global metrics: SHD wins $17/20$ on
 KRR-all ($p=6.4\times10^{-3}$) but is numerically behind it on GBM-all
 ($15.97$ vs $16.06$ K, SHD wins only $6/20$, n.s. $p=0.070$) — KT/SKT optimize
@@ -249,7 +252,7 @@ $8.5$ (SKT), $9.0$ (Random) and $11.5$ ($K$-Means).
 
 | Coreset ($M=300$) | KRR RMSE All (med / IQR) | KRR RMSE Peak (med / IQR) | KRR $R^2$ (med / IQR) | GBM RMSE All (med / IQR) | GBM RMSE Peak (med / IQR) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Oracle (full train)** | 0.80 | 2.78 | 0.809 | 0.38 | 1.11 |
+| **Oracle (KRR 9,000; GBM 16,000)** | 0.80 | 2.78 | 0.809 | 0.38 | 1.11 |
 | **Random** | 1.134 / 0.104 | 4.424 / 0.814 | 0.621 / 0.070 | 0.711 / 0.081 | 2.409 / 0.549 |
 | **K-Means** | 1.069 / 0.073 | 4.390 / 0.722 | 0.663 / 0.046 | **0.596 / 0.079** | 2.033 / 0.572 |
 | **Kernel Thinning (KT)** | 1.129 / 0.030 | 4.516 / 0.833 | 0.625 / 0.020 | 0.719 / 0.113 | 2.382 / 0.772 |
@@ -317,8 +320,10 @@ truth: `bench_heal_superconduct_results.json` (20 seeds, paired Wilcoxon).
 Headline: on a physically meaningful shift (low-$T_c$ iron-based → cuprate
 superconductors) the naive response is either blindness (RMSE 57 K) or catastrophic
 forgetting (old domain degrades 13.4 → 20.6 K). Surgical heal captures the new
-domain *and* keeps the old one — with a hard cap on crystal size for production
-memory budgets.
+domain *and* keeps the old one better than overwrite (13.36 vs 20.62 K), but not
+for free: pre-heal Domain A is 7.32 K, so the heal trades ≈6 K of old-domain
+accuracy for ≈30 K on the new domain. The crystal can be hard-capped for
+production memory budgets.
 
 ### 5. Streaming deltas under vibration bursts (`bench_deltas.py`)
 
@@ -355,6 +360,14 @@ telemetry; the default remains `False`.
 - **Legacy artifact:** `artifacts/superconduct_v37.hologram.npz` predates the
   stored projector; its OOD radar requires `check_domain_shift(X, distiller_ref=...)`.
   Crystals saved by `save_hologram(include_projector=True)` are self-contained.
+- **Legacy delta artifacts:** artifacts saved before v3.9.1 do not store
+  `include_deltas`; the loader treats them as non-delta. Load a legacy delta
+  crystal with `HologramCrystalLoader(path, include_deltas=True)`, then re-save
+  it with `save()` so the flag is persisted.
+- **Weighting is a trade-off, not a free win:** on 20 seeds with identical crystals,
+  gamma weights improve global KRR (SC 15.57 vs 15.99; reactor 0.975 vs 0.992;
+  both 20/20) but on the reactor they cost critical KRR (3.426 vs 3.335; uniform
+  wins 20/20). See `bench_weights_*_results.json`.
 - **OOD threshold:** the base `BW_ALERT_THRESHOLD = 0.085` (auto-widened for
   small batches as `0.085·sqrt(1024/B)`) is calibrated on the superconductivity
   heal benchmark, not a distribution-free constant. For a new domain, re-check

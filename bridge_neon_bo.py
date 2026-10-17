@@ -46,7 +46,11 @@ from sklearn.preprocessing import StandardScaler
 
 from shd import SpectralHologramDistiller
 
-# Import NEON Lab CPD-rank detector if the sibling repository is present
+# Import the vendored NEON Lab CPD-rank detector first, then fall back to the
+# sibling repository if it is present.
+_VENDOR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
+if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
+    sys.path.insert(0, _VENDOR)
 _NEON_REPO = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "pro")
 )

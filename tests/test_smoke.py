@@ -7,6 +7,7 @@ phase-peak regimes, then round-trips the artifacts through HologramCrystalLoader
 
 import os
 import sys
+import tempfile
 
 import numpy as np
 
@@ -91,7 +92,7 @@ def _fit_crystal(X, y, tail, crystal_size=80, seed=3):
 
 
 def test_version():
-    assert __version__ == "3.9.0"
+    assert __version__ == "3.9.2"
 
 
 def test_distiller_shapes(distilled):
@@ -342,6 +343,112 @@ def test_heal_max_crystal_size_prunes_background(distilled):
         assert tuple(np.round(row, 6)) in kept
     assert abs(np.mean(loader.weights) - 1.0) < 1e-9
     assert res["bw_after"] < res["bw_before"]
+
+
+def test_heal_max_crystal_size_is_hard_cap(distilled):
+    """The cap is a hard contract: final size <= cap, and an unsatisfiable cap
+    raises before mutating the loader."""
+    _, path, _, _ = distilled
+    X_in, y_in = make_stream(n=1200, seed=66)
+    X_shift = X_in.copy()
+    X_shift[:, 0:2] = X_shift[:, 0:2] * 1.8 + 1.6
+
+    loader = HologramCrystalLoader(path)
+    res = loader.heal_domain_shift(
+        X_shift, y_in + 8.0, n_inject=25, max_crystal_size=60, random_state=4
+    )
+    assert res["healed"] is True
+    assert res["n_injected"] == 25
+    # 80 old + 25 new = 105; protected = 25 new + 21 old peak = 46.
+    assert res["n_pruned"] == 45
+    assert len(loader.X) == 60
+    assert len(loader.X) <= 60
+
+    # 25 new + 21 protected old = 46 > 30: must fail loudly, before mutation.
+    loader2 = HologramCrystalLoader(path)
+    try:
+        loader2.heal_domain_shift(
+            X_shift, y_in + 8.0, n_inject=25, max_crystal_size=30, random_state=5
+        )
+    except ValueError as exc:
+        assert "max_crystal_size=30" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for an unsatisfiable max_crystal_size")
+    assert len(loader2.X) == 80
+
+
+def test_cli_npz_target_col():
+    """NPZ files without an explicit y must honour --target-col."""
+    from shd.cli import _load_tabular
+
+    tmp = tempfile.mkdtemp(prefix="shd_cli_npz_")
+    X = np.arange(20, dtype=np.float64).reshape(10, 2)
+    y = np.arange(10, dtype=np.float64)
+
+    p1 = os.path.join(tmp, "features_and_target.npz")
+    np.savez(p1, X=np.column_stack([X, y]))
+    Xa, ya = _load_tabular(p1, target_col=-1)
+    assert ya is not None and ya.shape == (10,)
+    assert Xa.shape == (10, 2)
+    assert np.allclose(ya, y)
+    assert np.allclose(Xa, X)
+
+    # An explicit y wins over --target-col; the feature matrix is unchanged.
+    p2 = os.path.join(tmp, "features_and_y.npz")
+    np.savez(p2, X=X, y=y)
+    Xb, yb = _load_tabular(p2, target_col=0)
+    assert yb is not None and Xb.shape == (10, 2)
+    assert np.allclose(yb, y)
+    assert np.allclose(Xb, X)
+
+    # A 1-D .npy must be reshaped to a single feature column.
+    p3 = os.path.join(tmp, "vector.npy")
+    np.save(p3, y)
+    Xc, yc = _load_tabular(p3)
+    assert Xc.shape == (10, 1) and yc is None
+
+
+def test_golden_crystal_numbers():
+    """Regression lock for a fixed synthetic stream.
+
+    Any refactor that silently changes medoid selection, FISTA weights, the
+    passport rank, or the radar geometry will fail here. Values were recorded on
+    the v3.9.1 default path; tolerances only absorb BLAS-level noise.
+    """
+    X, y = make_stream(n=8000, seed=123)
+    d = SpectralHologramDistiller(
+        crystal_size=120,
+        high_band_ratio=0.26,
+        sketch_dim=64,
+        tail_quantile=84.0,
+        phase_kappa=3.2,
+        random_state=7,
+    )
+    for i in range(0, len(X), 1000):
+        d.partial_fit(X[i : i + 1000], y[i : i + 1000])
+    rel_err = d.finalize_crystal()
+
+    assert len(d.crystal_X) == 120
+    assert d.crystal_X.shape == (120, 4)
+    assert abs(float(np.median(d.crystal_Y)) - 0.274023952995281) < 1e-7
+    assert abs(float(np.median(d.gamma_weights)) - 0.944936234133797) < 1e-7
+    assert abs(float(rel_err) - 0.08607388641467272) < 1e-7
+
+    path = os.path.join(tempfile.mkdtemp(prefix="shd_golden_"), "golden.npz")
+    d.save_hologram(path)
+    loader = HologramCrystalLoader(path)
+    summary = loader.summary()
+    assert summary["n_medoids"] == 120
+    assert summary["n_features"] == 4
+    assert summary["n_seen"] == 8000
+    assert summary["passport_rank"] == 32
+    assert summary["has_projector"] is True
+
+    X_shift = X[:200].copy()
+    X_shift[:, 0] = X_shift[:, 0] * 2.0 + 4.0
+    radar = loader.check_domain_shift(X_shift)
+    assert radar["is_shifted"] is True
+    assert abs(radar["bw_distance"] - 0.504485376709556) < 1e-3
 
 
 def test_two_tailed_trigger():
@@ -681,5 +788,108 @@ def test_include_deltas_streaming_augmentation():
     assert d.Omega.shape[0] == 6         # projector consumed [X || dX]
     # The shock region (post-jump rows) must be captured by the crystal
     assert int(np.sum(d.crystal_X[:, 0] > 1.5)) >= 3
+
+
+def test_partial_fit_copies_input_buffers():
+    """The warm-up buffer must copy caller-owned X/y so a reused streaming buffer
+    cannot mutate a crystal that has not been finalized yet."""
+    rng = np.random.default_rng(3)
+    X = rng.normal(size=(300, 4))
+    y = X[:, 0].copy()
+    original_X = X.copy()
+
+    d = SpectralHologramDistiller(
+        crystal_size=12, sketch_dim=16, random_state=0, max_init_buffer=4500
+    )
+    d.partial_fit(X, y)
+    assert not d.lattice_ready
+
+    # Typical streaming pattern: the caller reuses its batch buffer in place.
+    X[:] = 999.0
+    y[:] = -999.0
+    d.finalize_crystal()
+
+    assert not np.allclose(d.crystal_X, 999.0)
+    assert not np.allclose(d.crystal_Y, -999.0)
+    dists = np.linalg.norm(original_X[:, None, :] - d.crystal_X[None, :, :], axis=2)
+    assert np.all(np.min(dists, axis=0) < 1e-9)
+
+
+def test_mode_switch_is_rejected():
+    """A stream cannot switch between supervised and label-free mode midway."""
+    rng = np.random.default_rng(4)
+    X = rng.normal(size=(120, 4))
+    y = X[:, 0]
+
+    d = SpectralHologramDistiller(crystal_size=10, sketch_dim=16, random_state=0)
+    d.partial_fit(X, y)
+    try:
+        d.partial_fit(X, None)
+    except ValueError as e:
+        assert "cannot switch" in str(e)
+    else:
+        raise AssertionError("supervised -> label-free switch was silently accepted")
+
+    dl = SpectralHologramDistiller(crystal_size=10, sketch_dim=16, random_state=0)
+    dl.partial_fit(X)
+    assert dl.unsupervised_mode is True
+    try:
+        dl.partial_fit(X, y)
+    except ValueError as e:
+        assert "cannot switch" in str(e)
+    else:
+        raise AssertionError("label-free -> supervised switch was silently accepted")
+
+
+def test_delta_width_ambiguity_is_rejected():
+    """A plain 2-feature crystal must reject a 1-feature window instead of
+    silently reinterpreting it as a delta stream; a real delta crystal must
+    accept both raw d and pre-augmented 2d windows."""
+    import tempfile
+
+    rng = np.random.default_rng(11)
+    X = rng.normal(size=(600, 2))
+    y = X[:, 0]
+
+    d = SpectralHologramDistiller(
+        crystal_size=20, sketch_dim=16, random_state=0, max_init_buffer=200
+    )
+    for i in range(0, len(X), 200):
+        d.partial_fit(X[i : i + 200], y[i : i + 200])
+    d.finalize_crystal()
+    path = os.path.join(tempfile.mkdtemp(prefix="shd_width_"), "plain.hologram.npz")
+    d.save_hologram(path)
+
+    loader = HologramCrystalLoader(path)
+    assert loader.include_deltas is False
+    try:
+        loader.check_domain_shift(rng.normal(size=(32, 1)))
+    except ValueError as e:
+        assert "features" in str(e)
+    else:
+        raise AssertionError("1-feature window was silently treated as a delta stream")
+
+    dd = SpectralHologramDistiller(
+        crystal_size=20,
+        sketch_dim=16,
+        random_state=0,
+        include_deltas=True,
+        max_init_buffer=400,
+    )
+    for i in range(0, len(X), 200):
+        dd.partial_fit(X[i : i + 200], y[i : i + 200])
+    dd.finalize_crystal()
+    path_d = os.path.join(tempfile.mkdtemp(prefix="shd_width_"), "delta.hologram.npz")
+    dd.save_hologram(path_d)
+
+    loader_d = HologramCrystalLoader(path_d)
+    assert loader_d.include_deltas is True
+    assert np.isfinite(loader_d.check_domain_shift(rng.normal(size=(32, 2)))["bw_distance"])
+    assert np.isfinite(loader_d.check_domain_shift(rng.normal(size=(32, 4)))["bw_distance"])
+
+    # loader.save() must persist the flag across a second round-trip
+    path_d2 = os.path.join(tempfile.mkdtemp(prefix="shd_width_"), "delta_roundtrip.hologram.npz")
+    loader_d.save(path_d2)
+    assert HologramCrystalLoader(path_d2).include_deltas is True
 
 

@@ -1,4 +1,4 @@
-"""Spectral Hologram Distiller (SHD) v3.7 — streaming dataset distillation.
+"""Spectral Hologram Distiller (SHD) v3.9.1 — streaming dataset distillation.
 
 The core pipeline, in plain terms:
 
@@ -109,6 +109,15 @@ class SpectralHologramDistiller:
         Blend of tempered Voronoi weights vs FISTA herding weights in the
         final coreset sample weights (default 0.75). 1.0 = pure tempered
         Voronoi, 0.0 = pure herding.
+    use_residual : bool
+        Whether the phase trigger adds the ridge prediction residual to the
+        target-extremity term (default True). False isolates a y-only trigger.
+    critical_threshold : float or None
+        If set (supervised mode), the phase-peak band is defined by
+        ``y >= critical_threshold`` instead of the phase-score percentile.
+        ``auto_band_ratio=True`` then allocates cells in proportion to the
+        observed critical fraction (clipped to 10%-30%); this is the
+        critical-aware mode for domains with a known alarm threshold.
     """
 
     def __init__(
@@ -131,6 +140,9 @@ class SpectralHologramDistiller:
         voronoi_temper: float = 0.55,
         herding_mix: float = 0.75,
         on_nonfinite: str = "raise",
+        use_residual: bool = True,
+        critical_threshold: float | None = None,
+        auto_band_ratio: bool = False,
     ):
         if tail not in ("high", "low", "both"):
             raise ValueError(f"tail must be 'high', 'low' or 'both', got {tail!r}")
@@ -155,6 +167,9 @@ class SpectralHologramDistiller:
         self.fista_l2_reg = float(fista_l2_reg)
         self.voronoi_temper = float(voronoi_temper)
         self.herding_mix = float(herding_mix)
+        self.use_residual = bool(use_residual)
+        self.critical_threshold = None if critical_threshold is None else float(critical_threshold)
+        self.auto_band_ratio = bool(auto_band_ratio)
         self.rng = np.random.default_rng(random_state)
 
         self.n_seen = 0
@@ -162,6 +177,7 @@ class SpectralHologramDistiller:
         self.Phi_sum = None
         self._proj_initialized = False
         self.unsupervised_mode = False
+        self._mode = None  # "supervised" | "label_free", locked by the first non-empty batch
         self._prev_X_row = None
 
         self.init_Z, self.init_X, self.init_Y, self.init_U, self.init_score = [], [], [], [], []
@@ -262,6 +278,19 @@ class SpectralHologramDistiller:
 
         thr = np.percentile(sc_all, self.tail_q)
         is_high = sc_all >= thr
+        if self.critical_threshold is not None and self._mode != "label_free":
+            y_flat = Y_all.reshape(-1)
+            is_high = y_flat >= self.critical_threshold
+            frac = float(np.mean(is_high))
+            if self.auto_band_ratio:
+                ratio = float(np.clip(2.0 * frac, 0.10, 0.30)) if frac > 0 else 0.0
+                m_high = int(round(self.M * ratio))
+            else:
+                m_high = self.M_high
+            m_high = max(0, min(self.M, m_high))
+            m_low = self.M - m_high
+        else:
+            m_low, m_high = self.M_low, self.M_high
 
         # 1. Seed centers in phase space (Z, kappa*y): phase-peak centers are
         #    separated along the y-axis and cannot be absorbed by the background.
@@ -270,7 +299,6 @@ class SpectralHologramDistiller:
         #    crashing inside k-means++ seeding.
         ZY_low = ZY_all[~is_high]
         ZY_high = ZY_all[is_high]
-        m_low, m_high = self.M_low, self.M_high
         if len(ZY_low) == 0:
             m_low, m_high = 0, m_low + m_high
         elif len(ZY_high) == 0:
@@ -394,6 +422,17 @@ class SpectralHologramDistiller:
                     + "; clean the stream or pass on_nonfinite='drop' at construction"
                 )
 
+        mode = "label_free" if y_batch is None else "supervised"
+        if self._mode is None:
+            self._mode = mode
+        elif self._mode != mode:
+            raise ValueError(
+                "partial_fit() cannot switch between supervised (y_batch provided) and "
+                f"label-free (y_batch=None) mode after the first batch; this stream is "
+                f"already in {self._mode!r} mode. Create a new SpectralHologramDistiller "
+                "for the other mode."
+            )
+
         if self.d_in is None and X_batch.shape[1] > 0:
             self.d_in = int(X_batch.shape[1])
 
@@ -482,12 +521,15 @@ class SpectralHologramDistiller:
             y_z = np.maximum(0.0, -y_norm)
         else:  # "both"
             y_z = np.abs(y_norm)
-        phase_score = res_ratio + 2.0 * (y_z ** 2)
+        phase_score = (res_ratio if self.use_residual else 0.0) + 2.0 * (y_z ** 2)
 
         if not self.lattice_ready:
             self.init_Z.append(Z_B)
-            self.init_X.append(X_batch)
-            self.init_Y.append(y_batch)
+            # Copy caller-owned buffers: the caller may reuse its streaming buffer
+            # in place after partial_fit() returns, and the crystal is not built
+            # until finalize_crystal().
+            self.init_X.append(np.array(X_batch, dtype=np.float64, copy=True))
+            self.init_Y.append(np.array(y_batch, dtype=np.float64, copy=True))
             self.init_U.append(U_B)
             self.init_score.append(phase_score)
             target_buf = min(self.max_init_buffer, max(4500, self.M * 12))
@@ -583,6 +625,11 @@ class SpectralHologramDistiller:
         any reference to the original distiller object. The published artifact
         ``superconduct_v37.hologram.npz`` predates this field; the loader handles
         both formats.
+
+        The ``include_deltas`` flag is persisted so the loader can distinguish a
+        raw ``d``-feature delta stream from a plain ``d``-feature crystal. Without
+        it a 1-feature window fed to a 2-feature non-delta crystal would be
+        silently reinterpreted as a delta stream.
         """
         Psi_hat = self.Psi_sum / self.n_seen
         eigvals, eigvecs = linalg.eigh(Psi_hat)
@@ -596,6 +643,7 @@ class SpectralHologramDistiller:
             X_std=self.X_std.astype(np.float32),
             n_seen=np.array([self.n_seen], dtype=np.int64),
             tail=np.array(self.tail),
+            include_deltas=np.array(bool(self.include_deltas)),
         )
         if include_projector:
             payload["Omega"] = self.Omega.astype(np.float32)
@@ -619,7 +667,7 @@ class HologramCrystalLoader:
     :meth:`check_domain_shift`.
     """
 
-    def __init__(self, filepath: str = "hologram.npz"):
+    def __init__(self, filepath: str = "hologram.npz", include_deltas: bool | None = None):
         data = np.load(filepath, allow_pickle=False)
         self.filepath = filepath
         self.X = data["crystal_X"].astype(np.float64)
@@ -638,6 +686,22 @@ class HologramCrystalLoader:
             self.tail = "high"  # legacy artifacts predate the tail field
         if self.tail not in ("high", "low", "both"):
             self.tail = "high"
+
+        if include_deltas is not None:
+            self.include_deltas = bool(include_deltas)
+        elif "include_deltas" in data.files:
+            self.include_deltas = bool(np.asarray(data["include_deltas"]).item())
+        else:
+            # Legacy artifacts predate the flag. Treat them as plain (non-delta)
+            # crystals; pass include_deltas=True explicitly for a legacy delta
+            # crystal, then re-save to persist the flag.
+            self.include_deltas = False
+        if self.include_deltas and len(self.X_mean) % 2:
+            raise ValueError(
+                "artifact declares include_deltas=True but X_mean has odd width "
+                f"({len(self.X_mean)}); the artifact is inconsistent"
+            )
+
         self._prev_row = None  # last raw row of the previous streaming radar call
 
         if "Omega" in data.files:
@@ -716,11 +780,6 @@ class HologramCrystalLoader:
             X_new_stream = X_new_stream.reshape(1, -1)
         if X_new_stream.ndim != 2:
             raise ValueError(f"stream window must be 2-D, got shape {X_new_stream.shape}")
-        if X_new_stream.shape[1] != len(self.X_mean) and X_new_stream.shape[1] * 2 != len(self.X_mean):
-            raise ValueError(
-                f"stream window has {X_new_stream.shape[1]} features but this crystal expects "
-                f"{len(self.X_mean)} (or {len(self.X_mean) // 2} for a delta crystal)"
-            )
         if not np.isfinite(X_new_stream).all():
             raise ValueError(
                 "stream window contains NaN/Inf; the OOD radar projects raw rows, "
@@ -728,16 +787,39 @@ class HologramCrystalLoader:
             )
         if len(X_new_stream) == 0:
             raise ValueError("stream window is empty")
-        if len(self.X_mean) == 2 * X_new_stream.shape[1]:
-            dX = np.zeros_like(X_new_stream, dtype=np.float64)
-            if len(X_new_stream) > 1:
-                dX[1:] = X_new_stream[1:] - X_new_stream[:-1]
-            if remember_prev_row and self._prev_row is not None:
-                dX[0] = X_new_stream[0] - self._prev_row
-            if remember_prev_row and len(X_new_stream) > 0:
-                self._prev_row = np.asarray(X_new_stream[-1], dtype=np.float64).copy()
-            X_eff = np.hstack([X_new_stream, dX])
+        expected = len(self.X_mean)
+        if self.include_deltas:
+            if expected % 2:
+                raise ValueError(
+                    "artifact is marked include_deltas=True but X_mean has odd width "
+                    f"({expected}); the artifact is inconsistent"
+                )
+            d_raw = expected // 2
+            if X_new_stream.shape[1] == d_raw:
+                dX = np.zeros_like(X_new_stream, dtype=np.float64)
+                if len(X_new_stream) > 1:
+                    dX[1:] = X_new_stream[1:] - X_new_stream[:-1]
+                if remember_prev_row and self._prev_row is not None:
+                    dX[0] = X_new_stream[0] - self._prev_row
+                if remember_prev_row and len(X_new_stream) > 0:
+                    self._prev_row = np.asarray(X_new_stream[-1], dtype=np.float64).copy()
+                X_eff = np.hstack([X_new_stream, dX])
+            elif X_new_stream.shape[1] == expected:
+                # Already-augmented [x || dx] window: trust the caller and do not
+                # update the cross-call continuity state.
+                X_eff = X_new_stream
+            else:
+                raise ValueError(
+                    f"delta crystal expects {d_raw} raw features (or {expected} "
+                    f"pre-augmented [x || dx] features), got {X_new_stream.shape[1]}"
+                )
         else:
+            if X_new_stream.shape[1] != expected:
+                raise ValueError(
+                    f"stream window has {X_new_stream.shape[1]} features but this crystal "
+                    f"expects {expected} (non-delta crystal; pass include_deltas=True at "
+                    "distillation time for delta streams)"
+                )
             X_eff = X_new_stream
         return np.clip((X_eff - self.X_mean) / self.X_std, -8.0, 8.0)
 
@@ -840,24 +922,38 @@ class HologramCrystalLoader:
         force: bool = False,
         random_state: int = 42,
         streaming: bool = False,
+        new_weight_boost: float = 1.0,
+        passport_blend_min: float = 0.15,
+        passport_blend_max: float = 0.50,
+        protect_old_weight_frac: float = 0.0,
     ) -> dict:
         """Surgical self-healing: inject new Voronoi medoids when OOD shift is detected.
 
         Checks the Bures-Wasserstein radar on ``X_new_stream``. If a shift is
         detected (or ``force=True``), selects ``n_inject`` real medoids via
         k-means++ + Lloyd relaxation in normalized space, appends them to the
-        crystal without touching existing medoids (zero catastrophic forgetting),
-        and updates the 32-mode spectral passport in place. If
+        crystal (bounded forgetting: existing medoids are kept unless a cap is
+        set), and updates the 32-mode spectral passport in place. If
         ``max_crystal_size`` is set and exceeded, prunes only low-weight
         background medoids while protecting the phase-peak band and newly
         injected medoids; the protected band follows the crystal's ``tail``
         direction (top by ``y`` for ``"high"``, bottom for ``"low"``, most
-        extreme for ``"both"``).
+        extreme for ``"both"``). The cap is hard: if it cannot accommodate the
+        injected medoids plus the protected old band, a ``ValueError`` is raised
+        instead of silently returning an oversized crystal.
 
         With ``streaming=True`` (delta crystals), the embed of
         ``X_new_stream`` continues the first-difference sequence from the
         previous radar/heal call; the internal post-heal re-check stays
         stateless.
+
+        ``new_weight_boost`` multiplies the injected medoids' weights before
+        renormalisation (default 1.0; >1 gives the new regime more influence).
+        ``passport_blend_min``/``passport_blend_max`` bound the passport blend
+        coefficient (defaults 0.15/0.50); raising the floor helps repeated
+        heals converge faster on strong drift. ``protect_old_weight_frac``
+        additionally protects the top-weight fraction of old medoids from
+        pruning (default 0.0), which trades new-domain capacity for retention.
         """
         t0 = time.perf_counter()
         shift = self.check_domain_shift(X_new_stream, distiller_ref=distiller_ref)
@@ -877,6 +973,25 @@ class HologramCrystalLoader:
         )
         n_total = len(Z_new)
         n_sel = min(int(n_inject), n_total)
+
+        # Validate an impossible memory cap before mutating the loader. The
+        # phase-peak band and all injected medoids are protected, so the cap
+        # must be able to hold at least those (the exact count is re-checked
+        # after the protected set is built, where overlaps are known).
+        if max_crystal_size is not None:
+            cap_req = int(max_crystal_size)
+            if cap_req < 1:
+                raise ValueError(f"max_crystal_size must be >= 1, got {max_crystal_size}")
+            n_old_now = len(self.X)
+            n_protect_old = max(1, int(round(0.26 * n_old_now)))
+            n_protect_weight = int(round(float(protect_old_weight_frac) * n_old_now))
+            min_required = n_sel + n_protect_old + n_protect_weight
+            if cap_req < min_required:
+                raise ValueError(
+                    f"max_crystal_size={cap_req} cannot accommodate {n_sel} injected "
+                    f"medoids plus the protected band/weights (>= {min_required}); "
+                    f"use max_crystal_size >= {min_required} or reduce n_inject"
+                )
 
         # k-means++ seeding in Z-space
         first_idx = int(rng.integers(0, n_total))
@@ -901,7 +1016,7 @@ class HologramCrystalLoader:
         d_final = cdist(centers, Z_new, metric="sqeuclidean")
         med_idx = np.argmin(d_final, axis=1)
         counts = np.bincount(labels, minlength=n_sel).astype(np.float64) + 1.0
-        w_patch = counts / np.mean(counts)
+        w_patch = (counts / np.mean(counts)) * float(new_weight_boost)
 
         X_patch = X_new_stream[med_idx].astype(np.float64).copy()
         if y_new_stream is not None:
@@ -919,7 +1034,9 @@ class HologramCrystalLoader:
 
         n_pruned = 0
         if max_crystal_size is not None and len(self.X) > int(max_crystal_size):
-            cap = max(int(max_crystal_size), n_sel + 4)
+            cap = int(max_crystal_size)
+            if cap < 1:
+                raise ValueError(f"max_crystal_size must be >= 1, got {max_crystal_size}")
             excess = len(self.X) - cap
             if excess > 0:
                 # Protect the phase-peak band among old medoids + all new
@@ -934,28 +1051,46 @@ class HologramCrystalLoader:
                     peak_old_idx = np.argsort(np.abs(y_old - np.median(y_old)))[-n_protect_old:]
                 protected = np.zeros(len(self.X), dtype=bool)
                 protected[peak_old_idx] = True
+                n_protect_weight = int(round(float(protect_old_weight_frac) * n_old))
+                if n_protect_weight > 0:
+                    top_w_idx = np.argsort(self.weights[:n_old])[-n_protect_weight:]
+                    protected[top_w_idx] = True
                 protected[n_old:] = True
+                n_protected = int(protected.sum())
+                if cap < n_protected:
+                    raise ValueError(
+                        f"max_crystal_size={cap} cannot accommodate {n_sel} injected "
+                        f"medoids plus {n_protected - n_sel} protected old medoids; "
+                        f"use max_crystal_size >= {n_protected} or reduce n_inject"
+                    )
                 prunable_idx = np.where(~protected)[0]
-                if len(prunable_idx) > 0:
-                    n_drop = min(excess, len(prunable_idx))
-                    drop_order = prunable_idx[np.argsort(self.weights[prunable_idx])[:n_drop]]
-                    keep_mask = np.ones(len(self.X), dtype=bool)
-                    keep_mask[drop_order] = False
-                    # Reassign dropped weights to nearest kept medoids
-                    X_drop = self.X[drop_order]
-                    w_drop = self.weights[drop_order]
-                    self.X = self.X[keep_mask]
-                    self.y = self.y[keep_mask]
-                    self.weights = self.weights[keep_mask]
-                    nearest = np.argmin(cdist(X_drop, self.X, metric="sqeuclidean"), axis=1)
-                    np.add.at(self.weights, nearest, w_drop)
-                    self.weights /= np.mean(self.weights)
-                    n_pruned = int(n_drop)
+                n_drop = min(excess, len(prunable_idx))
+                drop_order = prunable_idx[np.argsort(self.weights[prunable_idx])[:n_drop]]
+                keep_mask = np.ones(len(self.X), dtype=bool)
+                keep_mask[drop_order] = False
+                # Reassign dropped weights to nearest kept medoids
+                X_drop = self.X[drop_order]
+                w_drop = self.weights[drop_order]
+                self.X = self.X[keep_mask]
+                self.y = self.y[keep_mask]
+                self.weights = self.weights[keep_mask]
+                nearest = np.argmin(cdist(X_drop, self.X, metric="sqeuclidean"), axis=1)
+                np.add.at(self.weights, nearest, w_drop)
+                self.weights /= np.mean(self.weights)
+                n_pruned = int(n_drop)
+                if len(self.X) > cap:  # defensive: the hard cap is a contract
+                    raise RuntimeError(
+                        f"internal error: healed crystal has {len(self.X)} medoids, cap={cap}"
+                    )
 
         # Blend the spectral passport with the new regime so subsequent radar
-        # checks recognize the healed domain as in-distribution.
+        # checks move toward the new domain. One heal does not necessarily clear
+        # the alert (the SC benchmark leaves BW at ~0.465 > 0.085); repeated
+        # heals or a domain bank may be needed.
         Psi_new = (U_new.T @ U_new) / max(len(U_new), 1)
-        alpha_blend = min(0.50, max(0.15, len(U_new) / (self.n_seen + len(U_new))))
+        alpha_blend = min(float(passport_blend_max),
+                          max(float(passport_blend_min),
+                              len(U_new) / (self.n_seen + len(U_new))))
         Psi_blend = (1.0 - alpha_blend) * self.Psi_passport + alpha_blend * Psi_new
         Psi_blend = 0.5 * (Psi_blend + Psi_blend.T)
         rank_p = len(self.eigvals)
@@ -991,6 +1126,7 @@ class HologramCrystalLoader:
             X_std=self.X_std.astype(np.float32),
             n_seen=np.array([self.n_seen], dtype=np.int64),
             tail=np.array(self.tail),
+            include_deltas=np.array(bool(self.include_deltas)),
         )
         if self.Omega is not None and self.phase is not None:
             payload["Omega"] = self.Omega.astype(np.float32)
@@ -1011,6 +1147,7 @@ class HologramCrystalLoader:
             "sketch_dim": int(self.k_dim),
             "passport_rank": int(len(self.eigvals)),
             "tail": self.tail,
+            "include_deltas": bool(self.include_deltas),
             "has_projector": bool(self.Omega is not None),
             "y_min": float(np.min(self.y)),
             "y_median": float(np.median(self.y)),
