@@ -1,7 +1,8 @@
 """Smoke tests for the SHD package: distill -> save -> load -> OOD radar.
 
-Runs the full v3.7 pipeline on a small synthetic dataset with a rare
-phase-peak regime, then round-trips the artifact through HologramCrystalLoader.
+Runs the full v3.8 pipeline (two-tailed trigger, optional adaptive y-stats,
+opt-in streaming delta continuity) on small synthetic datasets with rare
+phase-peak regimes, then round-trips the artifacts through HologramCrystalLoader.
 """
 
 import os
@@ -53,8 +54,44 @@ if pytest is not None:
         return make_distilled(tmp_path_factory)
 
 
+def make_stream_low(n=6000, seed=11):
+    """4D stream with a rare critical regime in the LOW tail of y
+    (e.g. a pressure sag): |x1| > 1.8 drives y down by ~6."""
+    rng = np.random.default_rng(seed)
+    X = rng.normal(0.0, 1.0, size=(n, 4))
+    y = np.sin(2.0 * X[:, 0]) + 0.5 * X[:, 1] * X[:, 2] + 0.1 * rng.normal(size=n)
+    sag = np.abs(X[:, 1]) > 1.8
+    y[sag] -= 6.0 + 1.5 * X[sag, 3]
+    return X, y
+
+
+def make_stream_both(n=6000, seed=13):
+    """4D stream with rare regimes in BOTH tails: hot (+6 on |x0| > 1.8)
+    and sag (-6 on |x1| > 1.8)."""
+    rng = np.random.default_rng(seed)
+    X = rng.normal(0.0, 1.0, size=(n, 4))
+    y = np.sin(2.0 * X[:, 0]) + 0.5 * X[:, 1] * X[:, 2] + 0.1 * rng.normal(size=n)
+    hot = np.abs(X[:, 0]) > 1.8
+    y[hot] += 6.0 + 1.5 * X[hot, 3]
+    sag = np.abs(X[:, 1]) > 1.8
+    y[sag] -= 6.0 + 1.5 * X[sag, 3]
+    return X, y
+
+
+def _fit_crystal(X, y, tail, crystal_size=80, seed=3):
+    d = SpectralHologramDistiller(
+        crystal_size=crystal_size, high_band_ratio=0.26, sketch_dim=64,
+        tail_quantile=84.0, tail=tail, random_state=seed,
+    )
+    B = 1500
+    for i in range(0, len(X), B):
+        d.partial_fit(X[i : i + B], y[i : i + B])
+    d.finalize_crystal()
+    return d
+
+
 def test_version():
-    assert __version__ == "3.7.0"
+    assert __version__ == "3.8.0"
 
 
 def test_distiller_shapes(distilled):
@@ -302,6 +339,183 @@ def test_heal_max_crystal_size_prunes_background(distilled):
     # All old phase-peak medoids must survive the pruning
     kept = set(map(tuple, np.round(loader.X, 6)))
     for row in old_peak_X:
+        assert tuple(np.round(row, 6)) in kept
+    assert abs(np.mean(loader.weights) - 1.0) < 1e-9
+    assert res["bw_after"] < res["bw_before"]
+
+
+def test_two_tailed_trigger():
+    """tail='low'/'both' must be accepted, stored in the artifact, direct the
+    loader's peak slice toward the matching extreme, and be ignored (forced
+    'high') in label-free mode.
+
+    Honest note (measured on these synthetic streams): capture of the matching
+    extreme regime at crystal level is dominated by the residual trigger and
+    the kappa*y phase geometry, so capture counts are NOT asserted to improve
+    with the matching tail; the deterministic effects are asserted instead.
+    """
+    import tempfile
+
+    X, y = make_stream_low()
+    d = _fit_crystal(X, y, tail="low")
+    assert d.crystal_X.shape == (80, 4)
+    path = os.path.join(tempfile.mkdtemp(prefix="shd_tail_"), "low.hologram.npz")
+    d.save_hologram(path)
+
+    loader = HologramCrystalLoader(path)
+    assert loader.tail == "low"
+    assert loader.summary()["tail"] == "low"
+    # the protected band follows the tail: peak slice = LOW-y medoids
+    Xp, yp, wp = loader.get_phase_peak_slice(high_band_ratio=0.25)
+    assert Xp.shape == (20, 4) and yp.shape == (20,)
+    assert float(np.median(yp)) < float(np.median(loader.y))
+
+    # tail='both' slice must contain BOTH extremes (hot and sag)
+    Xb, yb = make_stream_both()
+    db = _fit_crystal(Xb, yb, tail="both")
+    path_b = os.path.join(tempfile.mkdtemp(prefix="shd_tail_"), "both.hologram.npz")
+    db.save_hologram(path_b)
+    lb = HologramCrystalLoader(path_b)
+    assert lb.tail == "both"
+    _, ypb, _ = lb.get_phase_peak_slice(high_band_ratio=0.25)
+    assert int(np.sum(ypb > 3.0)) >= 2 and int(np.sum(ypb < -3.0)) >= 2
+
+    # label-free mode forces tail='high' regardless of the option:
+    # identical seeds -> bitwise-equal crystals for tail='low' and tail='high'
+    dl = SpectralHologramDistiller(
+        crystal_size=40, sketch_dim=32, tail="low", random_state=5, max_init_buffer=2500
+    )
+    dh = SpectralHologramDistiller(
+        crystal_size=40, sketch_dim=32, tail="high", random_state=5, max_init_buffer=2500
+    )
+    for i in range(0, len(X), 1500):
+        dl.partial_fit(X[i : i + 1500], y_batch=None)
+        dh.partial_fit(X[i : i + 1500], y_batch=None)
+    dl.finalize_crystal()
+    dh.finalize_crystal()
+    assert dl.unsupervised_mode and dh.unsupervised_mode
+    assert np.allclose(dl.crystal_X, dh.crystal_X)
+
+    # invalid tail is rejected
+    try:
+        SpectralHologramDistiller(tail="sideways")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for tail='sideways'")
+
+
+def test_adaptive_y_stats():
+    """adaptive_y_stats=True must track a target mean-shift after the lattice
+    is built; the default must keep the frozen first-batch statistics."""
+    rng = np.random.default_rng(9)
+    X = rng.normal(size=(4000, 3))
+    y = np.concatenate([rng.normal(0, 1, 2000), rng.normal(10, 1, 2000)])
+
+    d_frozen = SpectralHologramDistiller(
+        crystal_size=40, sketch_dim=32, max_init_buffer=1500, random_state=1
+    )
+    d_adapt = SpectralHologramDistiller(
+        crystal_size=40, sketch_dim=32, max_init_buffer=1500,
+        adaptive_y_stats=True, random_state=1,
+    )
+    B = 1000
+    for i in range(0, 4000, B):
+        d_frozen.partial_fit(X[i : i + B], y[i : i + B])
+        d_adapt.partial_fit(X[i : i + B], y[i : i + B])
+    assert d_frozen.lattice_ready and d_adapt.lattice_ready
+    # frozen: first-batch statistics (measured y_mean ~ -0.05)
+    assert abs(d_frozen.y_mean) < 0.30
+    # adaptive: EMA tracked the +10 drift in the post-warm-up batches
+    # (measured y_mean ~ 1.86 with the min(0.1, B/n_seen) rate)
+    assert d_adapt.y_mean > 1.0
+    assert d_adapt.y_std > 0.5
+    rel_f = d_frozen.finalize_crystal()
+    rel_a = d_adapt.finalize_crystal()
+    assert rel_f > 0 and rel_a > 0
+    assert d_frozen.crystal_X.shape == d_adapt.crystal_X.shape == (40, 3)
+
+
+def test_loader_streaming_delta_continuity():
+    """streaming=True must carry the last raw row across radar calls for a
+    delta crystal (cross-call dX[0] continuity); default calls stay stateless
+    and non-delta crystals ignore the flag."""
+    import tempfile
+
+    rng = np.random.default_rng(5)
+    n = 2500
+    t = np.arange(n)
+    X = np.column_stack([
+        np.sin(0.05 * t) + 0.05 * rng.normal(size=n),
+        np.cos(0.03 * t) + 0.05 * rng.normal(size=n),
+        rng.normal(0.0, 0.2, size=n),
+    ])
+    X[1500:, 0] += 3.0
+
+    d = SpectralHologramDistiller(
+        crystal_size=60, high_band_ratio=0.30, sketch_dim=48, tail_quantile=88.0,
+        include_deltas=True, max_init_buffer=1200, random_state=5,
+    )
+    for i in range(0, n, 500):
+        d.partial_fit(X[i : i + 500], y_batch=None)
+    d.finalize_crystal()
+    path = os.path.join(tempfile.mkdtemp(prefix="shd_delta_"), "delta.hologram.npz")
+    d.save_hologram(path)
+
+    loader = HologramCrystalLoader(path)
+    loader.check_domain_shift(X[:1000], streaming=True)
+    assert loader._prev_row is not None
+    assert np.allclose(loader._prev_row, X[999])
+    loader.check_domain_shift(X[1000:2000], streaming=True)
+    assert np.allclose(loader._prev_row, X[1999])
+
+    # default calls are stateless windows
+    loader2 = HologramCrystalLoader(path)
+    loader2.check_domain_shift(X[:1000])
+    assert loader2._prev_row is None
+
+    # non-delta crystals ignore the streaming flag entirely
+    Xn, yn = make_stream(n=2000, seed=4)
+    dn = SpectralHologramDistiller(crystal_size=30, sketch_dim=32, random_state=7)
+    dn.partial_fit(Xn[:1000], yn[:1000])
+    dn.partial_fit(Xn[1000:2000], yn[1000:2000])
+    dn.finalize_crystal()
+    path_n = os.path.join(tempfile.mkdtemp(prefix="shd_delta_"), "plain.hologram.npz")
+    dn.save_hologram(path_n)
+    loader3 = HologramCrystalLoader(path_n)
+    loader3.check_domain_shift(Xn[:1000], streaming=True)
+    assert loader3._prev_row is None
+
+
+def test_heal_protects_low_tail_band():
+    """With a tail='low' crystal, the heal size-cap must prune only background
+    medoids and protect the LOW-y phase-peak band (bottom 26% of old medoids)."""
+    import tempfile
+
+    X, y = make_stream_low()
+    d = _fit_crystal(X, y, tail="low")
+    path = os.path.join(tempfile.mkdtemp(prefix="shd_heal_"), "low.hologram.npz")
+    d.save_hologram(path)
+
+    loader = HologramCrystalLoader(path)
+    n_old = len(loader.X)
+    low_band_idx = np.argsort(loader.y)[: int(round(0.26 * n_old))]
+    low_band_X = loader.X[low_band_idx].copy()
+
+    X_dr = X[:1200].copy()
+    X_dr[:, 0:2] = X_dr[:, 0:2] * 1.8 + 1.6
+    y_dr = y[:1200] + 8.0
+    res = loader.heal_domain_shift(
+        X_dr, y_dr, n_inject=25, max_crystal_size=90, random_state=3
+    )
+    assert res["healed"] is True
+    assert res["n_injected"] == 25
+    # 80 old + 25 injected = 105; cap 90 -> exactly 15 background pruned
+    assert res["n_pruned"] == 15
+    assert len(loader.X) == 90
+    # every low-band (protected) medoid survived the pruning
+    kept = set(map(tuple, np.round(loader.X, 6)))
+    for row in low_band_X:
         assert tuple(np.round(row, 6)) in kept
     assert abs(np.mean(loader.weights) - 1.0) < 1e-9
     assert res["bw_after"] < res["bw_before"]

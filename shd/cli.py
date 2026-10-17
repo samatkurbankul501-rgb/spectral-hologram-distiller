@@ -80,6 +80,8 @@ def cmd_distill(args: argparse.Namespace) -> int:
         random_state=args.seed,
         max_init_buffer=args.max_init_buffer,
         include_deltas=args.include_deltas,
+        tail=args.tail,
+        adaptive_y_stats=args.adaptive_y_stats,
     )
     B = max(1, int(args.batch_size))
     for i in range(0, len(X), B):
@@ -102,7 +104,7 @@ def cmd_distill(args: argparse.Namespace) -> int:
 def cmd_radar(args: argparse.Namespace) -> int:
     loader = HologramCrystalLoader(args.crystal)
     X, _ = _load_tabular(args.input, target_col=args.target_col)
-    report = loader.check_domain_shift(X)
+    report = loader.check_domain_shift(X, streaming=args.streaming)
     print(json.dumps(report, indent=2))
     return 0
 
@@ -117,6 +119,7 @@ def cmd_heal(args: argparse.Namespace) -> int:
         max_crystal_size=args.max_crystal_size,
         force=args.force,
         random_state=args.seed,
+        streaming=args.streaming,
     )
     out_path = args.output or args.crystal
     if res["healed"]:
@@ -148,6 +151,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_dis.add_argument("--batch-size", type=int, default=2500)
     p_dis.add_argument("--max-init-buffer", type=int, default=8192)
     p_dis.add_argument("--include-deltas", action="store_true", help="Augment RFF sketch with streaming first differences")
+    p_dis.add_argument(
+        "--tail", choices=("high", "low", "both"), default="high",
+        help="Which y-tail the phase-peak trigger protects (default: high)",
+    )
+    p_dis.add_argument(
+        "--adaptive-y-stats", action="store_true",
+        help="Keep y_mean/y_std calibrated after lattice build (target-drift streams)",
+    )
     p_dis.add_argument("--seed", type=int, default=42)
     p_dis.set_defaults(func=cmd_distill)
 
@@ -155,6 +166,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_rad.add_argument("--crystal", "-c", required=True, help="Path to .hologram.npz file")
     p_rad.add_argument("--input", "-i", required=True, help="New batch CSV/NPY/NPZ path")
     p_rad.add_argument("--target-col", type=int, default=None, help="Target column index to strip if present")
+    p_rad.add_argument(
+        "--streaming", action="store_true",
+        help="Delta crystals: continue first differences from the previous radar call",
+    )
     p_rad.set_defaults(func=cmd_radar)
 
     p_heal = sub.add_parser("heal", help="Surgically inject new Voronoi medoids on domain shift")
@@ -165,6 +180,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_heal.add_argument("--n-inject", type=int, default=35)
     p_heal.add_argument("--max-crystal-size", type=int, default=None, help="Cap total crystal size by pruning low-weight background medoids")
     p_heal.add_argument("--force", action="store_true")
+    p_heal.add_argument("--streaming", action="store_true", help="Delta crystals: continue first differences from the previous call")
     p_heal.add_argument("--seed", type=int, default=42)
     p_heal.set_defaults(func=cmd_heal)
 

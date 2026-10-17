@@ -34,6 +34,10 @@ def main() -> int:
         "test_unsupervised_label_free_mode",
         "test_max_init_buffer_cap",
         "test_include_deltas_streaming_augmentation",
+        "test_two_tailed_trigger",
+        "test_adaptive_y_stats",
+        "test_loader_streaming_delta_continuity",
+        "test_heal_protects_low_tail_band",
     }
     test_names = [
         "test_version",
@@ -48,6 +52,10 @@ def main() -> int:
         "test_adaptive_threshold_and_small_batch",
         "test_heal_max_crystal_size_prunes_background",
         "test_include_deltas_streaming_augmentation",
+        "test_two_tailed_trigger",
+        "test_adaptive_y_stats",
+        "test_loader_streaming_delta_continuity",
+        "test_heal_protects_low_tail_band",
     ]
     failures = []
     for name in test_names:

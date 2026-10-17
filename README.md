@@ -1,4 +1,4 @@
-# Spectral Hologram Distiller (SHD v3.7)
+# Spectral Hologram Distiller (SHD v3.8)
 
 **Zero-GPU streaming dataset distillation with phase-manifold Voronoi medoids, kernel-herding spectral weights, and a 16-bit spectral-passport OOD radar.**
 
@@ -76,7 +76,8 @@ python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-c
    large `crystal_size`.
 2. **Residual / leverage trigger (supervised & label-free):** ridge predictor on
    the sketch; top-`q` percentile of `residual_ratio + 2·y_z²` marks phase-peak
-   candidates. When `y_batch=None` (label-free sensor telemetry), uses Bochner
+   candidates (`y_z` direction follows `tail`: `high` default | `low` | `both`).
+   When `y_batch=None` (label-free sensor telemetry), uses Bochner
    spectral leverage $s_i = u_i^T (\hat{\Psi} + \beta_{\text{low}} I_k)^{-1} u_i$
    as the synthetic novelty coordinate on `[Z ‖ κ·s_norm]`.
 3. **Phase-manifold lattice:** one non-overlapping Voronoi tessellation on
@@ -111,6 +112,36 @@ python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-c
   trade-off* (see section 5 below): better transient representation, measurably
   worse background RMSE — use it only when rate-of-change transients are the
   target regime; the default remains `False`.
+
+## Two-tailed trigger, adaptive y-stats, streaming radar (v3.8)
+
+- **Two-tailed phase trigger.** `SpectralHologramDistiller(tail=...)` chooses
+  which tail of the target the phase-peak score protects: `"high"` (default,
+  numerically identical to v3.7), `"low"` (pressure/voltage sags and other
+  low-y critical regimes), or `"both"` (either extreme). The crystal records
+  the mode; the loader's `get_phase_peak_slice()` and the heal size-cap
+  protection follow the same direction (`"both"` = most extreme relative to
+  the median). In label-free mode the synthetic coordinate is high spectral
+  leverage by construction, so `"high"` is always used there. *Measured
+  honesty note:* on the synthetic streams the residual trigger and the
+  κ·y phase geometry already isolate extreme-y regimes in either tail, so
+  crystal-level capture of the matching regime is within noise across tail
+  modes — the deterministic value of the option is the correct band direction
+  for peak slicing and heal protection, plus the score-side boost for the
+  chosen tail. All published tables use the default `tail="high"`.
+- **Adaptive y-statistics (opt-in).** `adaptive_y_stats=True` keeps
+  `y_mean`/`y_std` calibrated after the Voronoi lattice is built (exponential
+  moving average, rate `min(0.1, B/n_seen)`), so the κ·y phase coordinate does
+  not go stale on long streams with target drift. Default `False` = frozen
+  first-batch statistics, exactly as in the published benchmarks.
+- **Streaming radar continuity (opt-in).** `check_domain_shift(...,
+  streaming=True)` and `heal_domain_shift(..., streaming=True)`: for delta
+  crystals, the first difference of a window's opening row continues from the
+  previous call's last raw row (the distiller's cross-batch semantics)
+  instead of defaulting to zero. Non-delta crystals ignore the flag; the
+  default remains fully stateless per-call windows.
+- CLI: `--tail {high,low,both}` and `--adaptive-y-stats` on `distill`;
+  `--streaming` on `radar`/`heal`. Package version aligned to 3.8.0.
 
 ## Multi-seed benchmark results (20 seeds, paired Wilcoxon)
 
