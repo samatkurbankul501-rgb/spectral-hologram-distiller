@@ -290,16 +290,21 @@ def _refine_X(X, coreset, kernel, meanK=None, unique=False):
     return coreset
 
 
-def kt_thin(X, m, t, delta=0.5, seed=None, unique=True):
-    """Full KT pipeline on points X with Gaussian bandwidth t (squared dist).
+def kt_thin(X, m, var, delta=0.5, seed=None, unique=False):
+    """Full KT pipeline on points X with Gaussian bandwidth ``var`` (= sigma^2).
 
-    Returns coreset indices of size floor(n / 2^m) into X.
-    Split kernel: sqrt(gaussian); swap kernel: gaussian (paper defaults).
+    Parameters mirror the official ``goodpoints.kt.thin`` signature:
+    ``unique=False`` by default (the author's default), and ``m == 0`` returns
+    all row indices. Returns coreset indices of size floor(n / 2^m) into X.
+    Split kernel: Gaussian with var/2; swap kernel: Gaussian with var
+    (the configuration of the official numpy experiment notebook).
     """
     X = np.asarray(X, dtype=np.float64)
-    gauss, sqrt_gauss = make_gauss_kernels(t)
+    if m == 0:
+        return np.arange(X.shape[0], dtype=int)
+    gauss, gauss_half = make_gauss_kernels(var)
     meanK = _kernel_row_means(X, gauss)
-    coresets = _split_X(X, m, sqrt_gauss, delta=delta, seed=seed)
+    coresets = _split_X(X, m, gauss_half, delta=delta, seed=seed)
     coreset = _best_X(X, coresets, gauss, meanK=meanK)
     return _refine_X(X, coreset, gauss, meanK=meanK, unique=unique)
 
