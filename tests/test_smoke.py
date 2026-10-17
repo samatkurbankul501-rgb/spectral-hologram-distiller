@@ -1,4 +1,4 @@
-"""Smoke tests for the SHD package: distill -> save -> load -> OOD radar.
+﻿"""Smoke tests for the SHD package: distill -> save -> load -> OOD radar.
 
 Runs the full v3.8 pipeline (two-tailed trigger, optional adaptive y-stats,
 opt-in streaming delta continuity) on small synthetic datasets with rare
@@ -91,7 +91,7 @@ def _fit_crystal(X, y, tail, crystal_size=80, seed=3):
 
 
 def test_version():
-    assert __version__ == "3.8.0"
+    assert __version__ == "3.9.0"
 
 
 def test_distiller_shapes(distilled):
@@ -519,6 +519,137 @@ def test_heal_protects_low_tail_band():
         assert tuple(np.round(row, 6)) in kept
     assert abs(np.mean(loader.weights) - 1.0) < 1e-9
     assert res["bw_after"] < res["bw_before"]
+
+
+def test_input_validation_and_degenerate_data():
+    """Non-finite inputs, empty batches, shape mismatches, finalize-without-fit
+    and fully constant data must produce clear behaviour, not NumPy internals."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(200, 4))
+    y = rng.normal(size=200)
+
+    # NaN / Inf in features and targets -> ValueError naming the problem
+    for bad, label in ((np.nan, "NaN"), (np.inf, "Inf")):
+        Xb = X.copy()
+        Xb[3, 1] = bad
+        d = SpectralHologramDistiller(crystal_size=20, sketch_dim=16, random_state=0)
+        try:
+            d.partial_fit(Xb, y)
+        except ValueError as e:
+            assert "NaN/Inf" in str(e) and "rows" in str(e), f"{label}: {e}"
+        else:
+            raise AssertionError(f"{label} in features was silently accepted")
+
+    yb = y.copy()
+    yb[5] = np.nan
+    d = SpectralHologramDistiller(crystal_size=20, sketch_dim=16, random_state=0)
+    try:
+        d.partial_fit(X, yb)
+    except ValueError as e:
+        assert "NaN/Inf" in str(e)
+    else:
+        raise AssertionError("NaN target was silently accepted")
+
+    # on_nonfinite='drop' skips bad rows instead
+    Xd = X.copy()
+    Xd[3, 1] = np.nan
+    Xd[9, 0] = np.inf
+    d = SpectralHologramDistiller(crystal_size=20, sketch_dim=16, random_state=0,
+                                  on_nonfinite="drop")
+    d.partial_fit(Xd, y)
+    d.finalize_crystal()
+    assert d.n_seen == len(X) - 2
+
+    # empty batch is a valid no-op
+    d = SpectralHologramDistiller(crystal_size=20, sketch_dim=16, random_state=0)
+    d.partial_fit(np.empty((0, 4)), np.empty(0))
+    assert d.n_seen == 0
+
+    # length mismatch and width changes are rejected with explicit messages
+    d = SpectralHologramDistiller(crystal_size=20, sketch_dim=16, random_state=0)
+    try:
+        d.partial_fit(X, y[:50])
+    except ValueError as e:
+        assert "200" in str(e) and "50" in str(e)
+    else:
+        raise AssertionError("X/y length mismatch accepted")
+    d.partial_fit(X, y)
+    try:
+        d.partial_fit(rng.normal(size=(10, 7)), rng.normal(size=10))
+    except ValueError as e:
+        assert "features" in str(e)
+    else:
+        raise AssertionError("feature-width change accepted mid-stream")
+
+    # finalize without data
+    d = SpectralHologramDistiller(crystal_size=20, sketch_dim=16, random_state=0)
+    try:
+        d.finalize_crystal()
+    except ValueError as e:
+        assert "partial_fit" in str(e)
+    else:
+        raise AssertionError("finalize_crystal() without data did not raise")
+
+    # fully constant data builds a valid crystal (used to crash in k-means++)
+    d = SpectralHologramDistiller(crystal_size=10, sketch_dim=16, random_state=0)
+    d.partial_fit(np.ones((100, 4)), np.ones(100))
+    d.finalize_crystal()
+    assert d.crystal_X.shape == (10, 4)
+    assert np.all(np.isfinite(d.gamma_weights))
+
+    # radar window validation
+    import tempfile
+    d = SpectralHologramDistiller(crystal_size=20, sketch_dim=16, random_state=0)
+    d.partial_fit(X, y)
+    d.finalize_crystal()
+    path = os.path.join(tempfile.mkdtemp(prefix="shd_val_"), "c.hologram.npz")
+    d.save_hologram(path)
+    ld = HologramCrystalLoader(path)
+    for window, needle in (
+        (np.full((64, 4), np.nan), "NaN/Inf"),
+        (rng.normal(size=(64, 7)), "features"),
+        (np.empty((0, 4)), "empty"),
+    ):
+        try:
+            ld.check_domain_shift(window)
+        except ValueError as e:
+            assert needle in str(e), f"expected {needle!r} in {e}"
+        else:
+            raise AssertionError(f"radar accepted bad window ({needle})")
+
+
+def test_architecture_constants_are_wired():
+    """Sweepable constants must actually reach the computation, while the
+    default constructor keeps the published behaviour."""
+    rng = np.random.default_rng(11)
+    X = rng.normal(size=(1200, 4))
+    y = np.sin(2 * X[:, 0]) + 0.2 * rng.normal(size=1200)
+
+    def fit(**kw):
+        d = SpectralHologramDistiller(crystal_size=40, sketch_dim=32, random_state=3, **kw)
+        for i in range(0, len(X), 400):
+            d.partial_fit(X[i : i + 400], y[i : i + 400])
+        d.finalize_crystal()
+        return d
+
+    base = fit()
+    explicit = fit(phase_kappa=3.2, high_band_ratio=0.26, voronoi_temper=0.55,
+                   herding_mix=0.75, center_lr=0.25, fista_l2_reg=0.20,
+                   omega_low_scale=0.75, omega_high_scale=2.10)
+    assert np.allclose(base.crystal_X, explicit.crystal_X), "explicit defaults must match implicit defaults"
+
+    no_phase = fit(phase_kappa=0.0)
+    assert not np.allclose(base.crystal_X, no_phase.crystal_X), "phase_kappa did not reach the lattice"
+
+    diff_weights = fit(herding_mix=0.0)
+    assert not np.allclose(base.gamma_weights, diff_weights.gamma_weights), "herding_mix did not reach the weights"
+
+    try:
+        SpectralHologramDistiller(on_nonfinite="bogus")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid on_nonfinite accepted")
 
 
 def test_include_deltas_streaming_augmentation():

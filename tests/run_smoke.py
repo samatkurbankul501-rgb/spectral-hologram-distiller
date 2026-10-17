@@ -38,6 +38,8 @@ def main() -> int:
         "test_adaptive_y_stats",
         "test_loader_streaming_delta_continuity",
         "test_heal_protects_low_tail_band",
+        "test_input_validation_and_degenerate_data",
+        "test_architecture_constants_are_wired",
     }
     test_names = [
         "test_version",
@@ -56,6 +58,8 @@ def main() -> int:
         "test_adaptive_y_stats",
         "test_loader_streaming_delta_continuity",
         "test_heal_protects_low_tail_band",
+        "test_input_validation_and_degenerate_data",
+        "test_architecture_constants_are_wired",
     ]
     failures = []
     for name in test_names:

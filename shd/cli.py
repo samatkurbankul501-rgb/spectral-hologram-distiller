@@ -82,6 +82,7 @@ def cmd_distill(args: argparse.Namespace) -> int:
         include_deltas=args.include_deltas,
         tail=args.tail,
         adaptive_y_stats=args.adaptive_y_stats,
+        on_nonfinite=args.on_nonfinite,
     )
     B = max(1, int(args.batch_size))
     for i in range(0, len(X), B):
@@ -158,6 +159,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_dis.add_argument(
         "--adaptive-y-stats", action="store_true",
         help="Keep y_mean/y_std calibrated after lattice build (target-drift streams)",
+    )
+    p_dis.add_argument(
+        "--on-nonfinite", choices=("raise", "drop"), default="raise",
+        help="NaN/Inf policy: fail loudly (default) or skip affected rows",
     )
     p_dis.add_argument("--seed", type=int, default=42)
     p_dis.set_defaults(func=cmd_distill)

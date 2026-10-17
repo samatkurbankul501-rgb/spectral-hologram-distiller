@@ -89,6 +89,26 @@ class SpectralHologramDistiller:
         not go stale on long streams with target drift. Default ``False``
         preserves the frozen first-batch statistics of the published
         benchmarks.
+    omega_low_scale : float
+        Std of the low-frequency half of the RFF projection matrix, in units
+        of ``1 / sqrt(d)`` (default 0.75).
+    omega_high_scale : float
+        Std of the high-frequency half of the RFF projection matrix, in units
+        of ``1 / sqrt(d)`` (default 2.10).
+    center_lr : float
+        Upper bound of the online lattice centroid learning rate
+        (default 0.25).
+    fista_l2_reg : float
+        Diagonal ridge added to the herding Gram matrix and the matching
+        linear term (default 0.20).
+    voronoi_temper : float
+        Exponent of the Voronoi-measure tempering ``p ** voronoi_temper``
+        (default 0.55). 0.0 disables tempering (uniform relative volumes);
+        1.0 uses raw cell volumes.
+    herding_mix : float
+        Blend of tempered Voronoi weights vs FISTA herding weights in the
+        final coreset sample weights (default 0.75). 1.0 = pure tempered
+        Voronoi, 0.0 = pure herding.
     """
 
     def __init__(
@@ -104,9 +124,20 @@ class SpectralHologramDistiller:
         include_deltas: bool = False,
         tail: str = "high",
         adaptive_y_stats: bool = False,
+        omega_low_scale: float = 0.75,
+        omega_high_scale: float = 2.10,
+        center_lr: float = 0.25,
+        fista_l2_reg: float = 0.20,
+        voronoi_temper: float = 0.55,
+        herding_mix: float = 0.75,
+        on_nonfinite: str = "raise",
     ):
         if tail not in ("high", "low", "both"):
             raise ValueError(f"tail must be 'high', 'low' or 'both', got {tail!r}")
+        if on_nonfinite not in ("raise", "drop"):
+            raise ValueError(f"on_nonfinite must be 'raise' or 'drop', got {on_nonfinite!r}")
+        self.on_nonfinite = on_nonfinite
+        self.d_in = None  # fixed by the first non-empty batch
         self.M = crystal_size
         self.M_high = int(round(crystal_size * high_band_ratio))
         self.M_low = crystal_size - self.M_high
@@ -118,6 +149,12 @@ class SpectralHologramDistiller:
         self.include_deltas = bool(include_deltas)
         self.tail = tail
         self.adaptive_y_stats = bool(adaptive_y_stats)
+        self.omega_low_scale = float(omega_low_scale)
+        self.omega_high_scale = float(omega_high_scale)
+        self.center_lr = float(center_lr)
+        self.fista_l2_reg = float(fista_l2_reg)
+        self.voronoi_temper = float(voronoi_temper)
+        self.herding_mix = float(herding_mix)
         self.rng = np.random.default_rng(random_state)
 
         self.n_seen = 0
@@ -155,8 +192,8 @@ class SpectralHologramDistiller:
 
         scale_d = 1.0 / np.sqrt(max(d, 1))
         k_half = self.k // 2
-        omega_low = self.rng.normal(0, 0.75 * scale_d, size=(d, k_half))
-        omega_high = self.rng.normal(0, 2.10 * scale_d, size=(d, self.k - k_half))
+        omega_low = self.rng.normal(0, self.omega_low_scale * scale_d, size=(d, k_half))
+        omega_high = self.rng.normal(0, self.omega_high_scale * scale_d, size=(d, self.k - k_half))
         self.Omega = np.hstack([omega_low, omega_high])
         self.phase = self.rng.uniform(0, 2 * np.pi, size=(1, self.k))
         self._proj_initialized = True
@@ -190,14 +227,24 @@ class SpectralHologramDistiller:
 
     def _seed_kmeans_pp(self, ZY_cand: np.ndarray, n_select: int) -> np.ndarray:
         n_total = len(ZY_cand)
+        if n_total == 0:
+            # Degenerate split (every row in the same trigger class): there is
+            # nothing to seed here; the caller rebalances the centre budget.
+            return ZY_cand[:0].copy()
         n_select = min(n_select, n_total)
         first_idx = int(self.rng.integers(0, n_total))
         selected = [first_idx]
         min_sq_dists = np.sum((ZY_cand - ZY_cand[first_idx]) ** 2, axis=1)
 
         for _ in range(1, n_select):
-            probs = min_sq_dists / (np.sum(min_sq_dists) + 1e-12)
-            next_idx = int(self.rng.choice(n_total, p=probs))
+            total = float(np.sum(min_sq_dists))
+            if not np.isfinite(total) or total <= 0:
+                # All candidates coincide with a chosen centre (degenerate or
+                # constant data): fall back to uniform sampling.
+                next_idx = int(self.rng.integers(0, n_total))
+            else:
+                probs = min_sq_dists / total
+                next_idx = int(self.rng.choice(n_total, p=probs))
             selected.append(next_idx)
             new_dists = np.sum((ZY_cand - ZY_cand[next_idx]) ** 2, axis=1)
             min_sq_dists = np.minimum(min_sq_dists, new_dists)
@@ -218,8 +265,18 @@ class SpectralHologramDistiller:
 
         # 1. Seed centers in phase space (Z, kappa*y): phase-peak centers are
         #    separated along the y-axis and cannot be absorbed by the background.
-        c_low = self._seed_kmeans_pp(ZY_all[~is_high], self.M_low)
-        c_high = self._seed_kmeans_pp(ZY_all[is_high], self.M_high)
+        #    If one class is empty (degenerate trigger, e.g. constant targets),
+        #    its centre budget is reallocated to the non-empty class instead of
+        #    crashing inside k-means++ seeding.
+        ZY_low = ZY_all[~is_high]
+        ZY_high = ZY_all[is_high]
+        m_low, m_high = self.M_low, self.M_high
+        if len(ZY_low) == 0:
+            m_low, m_high = 0, m_low + m_high
+        elif len(ZY_high) == 0:
+            m_low, m_high = m_low + m_high, 0
+        c_low = self._seed_kmeans_pp(ZY_low, m_low)
+        c_high = self._seed_kmeans_pp(ZY_high, m_high)
         centers_ZY = np.vstack([c_low, c_high])
         M_total = len(centers_ZY)
 
@@ -279,8 +336,67 @@ class SpectralHologramDistiller:
         and uses it as a synthetic novelty response on the phase manifold
         ``[Z || kappa * s_norm]``, preserving rare / anomalous sensor states
         without labels.
+
+        Input validation: the batch must be a non-empty 2-D ``float`` array
+        whose width matches the width of the first batch; ``y_batch`` must be
+        ``None`` or have exactly ``len(X_batch)`` entries. Non-finite entries
+        raise ``ValueError`` (pass ``on_nonfinite="drop"`` at construction to
+        drop affected rows instead, as an industrial convenience). An empty
+        batch is a valid no-op so that idling sensor windows do not crash a
+        running stream.
         """
+        X_batch = np.asarray(X_batch, dtype=np.float64)
+        if X_batch.ndim == 1:
+            X_batch = X_batch.reshape(1, -1)
+        if X_batch.ndim != 2:
+            raise ValueError(f"X_batch must be 2-D (batch, features), got shape {X_batch.shape}")
         B = X_batch.shape[0]
+
+        if self.d_in is not None and X_batch.shape[1] > 0 and X_batch.shape[1] != self.d_in:
+            raise ValueError(
+                f"X_batch has {X_batch.shape[1]} features but the stream was opened with "
+                f"{self.d_in}; feature width cannot change mid-stream"
+            )
+
+        if y_batch is not None:
+            y_batch = np.asarray(y_batch, dtype=np.float64)
+            if y_batch.ndim == 2 and y_batch.shape[1] == 1:
+                y_batch = y_batch.reshape(-1, 1)
+            if y_batch.ndim not in (1, 2):
+                raise ValueError(f"y_batch must be 1-D or (B, 1), got shape {y_batch.shape}")
+            if len(y_batch) != B:
+                raise ValueError(
+                    f"X_batch has {B} rows but y_batch has {len(y_batch)}; they must match"
+                )
+
+        if B == 0:
+            return self  # empty window: valid no-op
+
+        finite_mask = np.isfinite(X_batch).all(axis=1)
+        if y_batch is not None:
+            y_flat = y_batch.reshape(len(y_batch), -1)
+            finite_mask &= np.isfinite(y_flat).all(axis=1)
+        n_bad = int(np.sum(~finite_mask))
+        if n_bad:
+            if self.on_nonfinite == "drop":
+                keep = finite_mask
+                if not np.any(keep):
+                    return self
+                X_batch = X_batch[keep]
+                if y_batch is not None:
+                    y_batch = y_batch[keep]
+                B = X_batch.shape[0]
+            else:
+                bad_cols = np.where(~np.isfinite(X_batch).all(axis=0))[0].tolist()
+                raise ValueError(
+                    f"{n_bad} of {B} rows contain NaN/Inf"
+                    + (f" (feature columns {bad_cols})" if bad_cols else " (in y_batch)")
+                    + "; clean the stream or pass on_nonfinite='drop' at construction"
+                )
+
+        if self.d_in is None and X_batch.shape[1] > 0:
+            self.d_in = int(X_batch.shape[1])
+
         y_is_synthetic = False
 
         if y_batch is None:
@@ -294,8 +410,8 @@ class SpectralHologramDistiller:
                 self.X_std = np.std(X_eff0, axis=0) + 1e-8
                 scale_d = 1.0 / np.sqrt(max(d, 1))
                 k_half = self.k // 2
-                omega_low = self.rng.normal(0, 0.75 * scale_d, size=(d, k_half))
-                omega_high = self.rng.normal(0, 2.10 * scale_d, size=(d, self.k - k_half))
+                omega_low = self.rng.normal(0, self.omega_low_scale * scale_d, size=(d, k_half))
+                omega_high = self.rng.normal(0, self.omega_high_scale * scale_d, size=(d, self.k - k_half))
                 self.Omega = np.hstack([omega_low, omega_high])
                 self.phase = self.rng.uniform(0, 2 * np.pi, size=(1, self.k))
                 Z_B, U_B = self._spectral_transform(X_batch, update_state=True)
@@ -392,7 +508,7 @@ class SpectralHologramDistiller:
             new_count = old_count + n_new
             self.counts[c_id] = new_count
 
-            lr = min(0.25, n_new / new_count)
+            lr = min(self.center_lr, n_new / new_count)
             self.centers_ZY[c_id] = (1.0 - lr) * self.centers_ZY[c_id] + lr * np.mean(ZY_B[mask], axis=0)
 
             d_cand = np.sum((ZY_B[mask] - self.centers_ZY[c_id]) ** 2, axis=1)
@@ -408,6 +524,11 @@ class SpectralHologramDistiller:
 
     def finalize_crystal(self, fista_steps: int = 250) -> float:
         """Build the crystal and fit herding weights; returns relative spectral error."""
+        if self.n_seen == 0 or (not self.lattice_ready and not self.init_X):
+            raise ValueError(
+                "finalize_crystal() called before any data was absorbed; "
+                "call partial_fit() with at least one non-empty batch first"
+            )
         if not self.lattice_ready:
             self._build_phase_manifold_lattice()
 
@@ -422,8 +543,8 @@ class SpectralHologramDistiller:
 
         Psi_hat = self.Psi_sum / self.n_seen
         G_U = self.crystal_U @ self.crystal_U.T
-        K = (G_U ** 2) + 0.20 * np.eye(M_curr)
-        b = np.sum((self.crystal_U @ Psi_hat) * self.crystal_U, axis=1) + 0.20 * voronoi_prob
+        K = (G_U ** 2) + self.fista_l2_reg * np.eye(M_curr)
+        b = np.sum((self.crystal_U @ Psi_hat) * self.crystal_U, axis=1) + self.fista_l2_reg * voronoi_prob
 
         L_lip = float(linalg.norm(K, ord=2)) + 1e-6
         gamma = voronoi_prob.copy()
@@ -441,11 +562,11 @@ class SpectralHologramDistiller:
         Psi_crystal = (self.crystal_U.T * gamma_prob) @ self.crystal_U
         rel_error = linalg.norm(Psi_crystal - Psi_hat, ord="fro") / linalg.norm(Psi_hat, ord="fro")
 
-        # Root tempering of the Voronoi measure (p^0.55): keeps the global RMSE
-        # balanced while preserving the amplitude of the phase-peak band.
-        tempered_voronoi = (voronoi_prob ** 0.55)
+        # Root tempering of the Voronoi measure (p ** voronoi_temper): keeps the
+        # global RMSE balanced while preserving the amplitude of the phase-peak band.
+        tempered_voronoi = (voronoi_prob ** self.voronoi_temper)
         tempered_voronoi /= np.sum(tempered_voronoi)
-        w_combined = (0.75 * tempered_voronoi + 0.25 * gamma_prob) * M_curr
+        w_combined = (self.herding_mix * tempered_voronoi + (1.0 - self.herding_mix) * gamma_prob) * M_curr
         self.gamma_weights = w_combined / np.mean(w_combined)
         return rel_error
 
@@ -590,6 +711,23 @@ class HologramCrystalLoader:
         X_new_stream: np.ndarray,
         remember_prev_row: bool = False,
     ) -> np.ndarray:
+        X_new_stream = np.asarray(X_new_stream, dtype=np.float64)
+        if X_new_stream.ndim == 1:
+            X_new_stream = X_new_stream.reshape(1, -1)
+        if X_new_stream.ndim != 2:
+            raise ValueError(f"stream window must be 2-D, got shape {X_new_stream.shape}")
+        if X_new_stream.shape[1] != len(self.X_mean) and X_new_stream.shape[1] * 2 != len(self.X_mean):
+            raise ValueError(
+                f"stream window has {X_new_stream.shape[1]} features but this crystal expects "
+                f"{len(self.X_mean)} (or {len(self.X_mean) // 2} for a delta crystal)"
+            )
+        if not np.isfinite(X_new_stream).all():
+            raise ValueError(
+                "stream window contains NaN/Inf; the OOD radar projects raw rows, "
+                "so non-finite values cannot be scored"
+            )
+        if len(X_new_stream) == 0:
+            raise ValueError("stream window is empty")
         if len(self.X_mean) == 2 * X_new_stream.shape[1]:
             dX = np.zeros_like(X_new_stream, dtype=np.float64)
             if len(X_new_stream) > 1:

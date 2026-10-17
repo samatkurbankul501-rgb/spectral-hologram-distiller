@@ -10,15 +10,23 @@ Design (honest and cheap):
   paired Wilcoxon signed-rank tests: SHD vs Random, SHD vs K-Means.
 
 Results are dumped to bench_seeds_results.json — the single source of truth.
+Progress is checkpointed after every seed, so an interrupted long run keeps the
+seeds it already finished (`partial: true` marks an incomplete dataset).
+
+Baselines: Random, MiniBatch K-Means, Kernel Thinning (Dwivedi & Mackey, JMLR 2024)
+and Supervised Kernel Thinning (Gong et al., NeurIPS 2024) — the latter two run
+through `kt_baseline.py`, a pure-numpy port verified bit-exact against the
+official Microsoft `goodpoints` X-path (`verify_kt_port.py`).
 
 Usage:
-    python bench_seeds.py [--seeds 20] [--dataset superconduct|reactor|both]
+    python bench_seeds.py [--seeds 20] [--dataset superconduct|reactor|both] [--skip-kt]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 
 import numpy as np
@@ -184,7 +192,48 @@ def eval_models(X_c, y_c, w_c, scaler, model_seed, X_te, Z_te, y_te, X_te_crit, 
 # --- per-dataset experiment -----------------------------------------------------
 
 
-def run_dataset(key, seeds, m, batch, model_seed, include_kt=True):
+def _checkpoint(path, key, records, m, seeds, oracle, title, t0, done):
+    """Write progress after each seed so an interrupted long run is not lost."""
+    if not path:
+        return
+    payload = {
+        "results": {
+            key: {
+                "dataset": key,
+                "title": title,
+                "crystal_size": m,
+                "n_seeds": len(seeds),
+                "seeds": list(seeds),
+                "split_random_state": 42,
+                "oracle": {
+                    "krr_rmse_all": oracle["krr"][0], "krr_rmse_crit": oracle["krr"][1],
+                    "krr_r2": oracle["krr"][2], "gbm_rmse_all": oracle["gbm"][0],
+                    "gbm_rmse_crit": oracle["gbm"][1], "gbm_r2": oracle["gbm"][2],
+                },
+                "records": records,
+                "wilcoxon": {},
+                "elapsed_sec": time.perf_counter() - t0,
+                "partial": not done,
+            }
+        }
+    }
+    merged = {"config": {}, "results": {}}
+    try:
+        with open(path, encoding="utf-8") as f:
+            existing = json.load(f)
+        if isinstance(existing.get("results"), dict):
+            merged = existing
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    merged.setdefault("results", {})
+    merged["results"].update(payload["results"])
+    tmp = path + ".part"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def run_dataset(key, seeds, m, batch, model_seed, include_kt=True, checkpoint_path=None):
     t0 = time.perf_counter()
     if key == "superconduct":
         X_raw, y_raw, crit_threshold, title = load_superconduct()
@@ -257,10 +306,11 @@ def run_dataset(key, seeds, m, batch, model_seed, include_kt=True):
             rec["skt"]["rare_captured"] = int(np.sum(yc >= crit_threshold))
 
         records.append(rec)
+        _checkpoint(checkpoint_path, key, records, m, seeds, oracle, title, t0, done=False)
         kt_s = f" kt={rec['kt']['krr_rmse_crit']:.2f} skt={rec['skt']['krr_rmse_crit']:.2f}" if include_kt else ""
         print(f"[{key}] seed {seed:2d}: shd krr_crit={rec['shd']['krr_rmse_crit']:.2f} "
               f"rand={rec['random']['krr_rmse_crit']:.2f} km={rec['kmeans']['krr_rmse_crit']:.2f}{kt_s} "
-              f"rare={n_rare} ({time.perf_counter() - t_s:.1f}s)")
+              f"rare={n_rare} ({time.perf_counter() - t_s:.1f}s)", flush=True)
 
     # Paired Wilcoxon tests.
     tests = {}
@@ -285,6 +335,8 @@ def run_dataset(key, seeds, m, batch, model_seed, include_kt=True):
                 "statistic": float(stat),
                 "p_value": float(p),
             }
+
+    _checkpoint(checkpoint_path, key, records, m, seeds, oracle, title, t0, done=True)
 
     summary = {
         "dataset": key,
@@ -330,7 +382,7 @@ def main():
         for key in keys:
             out["results"][key] = run_dataset(
                 key, seeds, m=300, batch=2500, model_seed=args.model_seed,
-                include_kt=not args.skip_kt,
+                include_kt=not args.skip_kt, checkpoint_path=path,
             )
 
     # Recompute Wilcoxon + IQR across all stored datasets to guarantee schema uniformity.
