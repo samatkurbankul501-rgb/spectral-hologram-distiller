@@ -92,7 +92,7 @@ def _fit_crystal(X, y, tail, crystal_size=80, seed=3):
 
 
 def test_version():
-    assert __version__ == "3.11.0"
+    assert __version__ == "3.11.1"
 
 
 def test_distiller_shapes(distilled):

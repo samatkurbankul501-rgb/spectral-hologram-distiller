@@ -1,4 +1,4 @@
-"""Command-line interface for Spectral Hologram Distiller (SHD v3.11.0).
+"""Command-line interface for Spectral Hologram Distiller (SHD v3.11.1).
 
 Usage examples:
     python -m shd inspect artifacts/superconduct_v37.hologram.npz
@@ -106,6 +106,7 @@ def cmd_distill(args: argparse.Namespace) -> int:
         tail=args.tail,
         adaptive_y_stats=args.adaptive_y_stats,
         on_nonfinite=args.on_nonfinite,
+        passport_reference=args.passport_reference,
     )
     B = max(1, int(args.batch_size))
     for i in range(0, len(X), B):
@@ -155,12 +156,14 @@ def cmd_heal(args: argparse.Namespace) -> int:
         res["output"] = out_path
         res["file_size_kb"] = round(float(size_kb), 2)
         res["n_medoids_total"] = int(len(loader.X))
+    if res.get("warning"):
+        print("WARNING: " + res["warning"], file=sys.stderr)
     print(json.dumps(res, indent=2))
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="shd", description="Spectral Hologram Distiller (SHD v3.11.0) CLI")
+    p = argparse.ArgumentParser(prog="shd", description="Spectral Hologram Distiller (SHD v3.11.1) CLI")
     sub = p.add_subparsers(dest="command", required=True)
 
     p_ins = sub.add_parser("inspect", help="Inspect a .hologram.npz crystal")
@@ -196,6 +199,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="NaN/Inf policy: fail loudly (default) or skip affected rows",
     )
     p_dis.add_argument("--seed", type=int, default=42)
+    p_dis.add_argument(
+        "--passport-reference", choices=("stream", "background"), default="stream",
+        help=(
+            "Population the spectral passport describes: 'stream' (default, "
+            "reproduces the published artifacts) or 'background' (opt-in, "
+            "experimental: passport over non-peak rows only; changes the "
+            "radar's sensitivity, re-benchmark before trusting it)"
+        ),
+    )
     p_dis.set_defaults(func=cmd_distill)
 
     p_rad = sub.add_parser("radar", help="Run Bures-Wasserstein OOD radar against a crystal")

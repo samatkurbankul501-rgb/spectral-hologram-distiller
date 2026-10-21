@@ -135,6 +135,31 @@ class SpectralHologramDistiller:
         rebuild is O(reservoir * M) in time and is amortised over the stream;
         the retained reservoir stays bounded by ``max_init_buffer`` rows, so
         memory remains O(k^2 + d + reservoir).
+    peak_z_threshold : float
+        |y| in standard deviations above which a streamed row is retained in
+        the reservoir's *peak* stratum (which never evicts) instead of the
+        evicting *background* stratum. Default 2.0.
+    passport_reference : str
+        Which population the spectral passport describes.
+
+        ``"stream"`` (default, v3.11.1) builds the passport over every row.
+        This is the reference the published artifacts were distilled with, so
+        it keeps them reproducible and keeps the radar's alert semantics
+        identical to the documented ones.
+
+        ``"background"`` (opt-in, experimental) builds the passport from the
+        BACKGROUND rows only -- the rows that did NOT trigger the phase-peak
+        score. The radar then answers "is this window the background
+        regime?", which is the question an early-warning system actually asks:
+        measured on a 20k-row stream, a shifted regime occupying 10% of the
+        TRAINING data made the whole-stream passport flag 100% of the normal
+        windows as shifted (BW 0.158 vs threshold 0.120), because the
+        reference itself absorbed the shift. It is NOT the default because it
+        changes the radar's sensitivity, not only its reference: on the
+        shipped regression suite it moved the golden shift distance
+        (0.50448 -> 0.52960) and stopped the heal from firing on a shifted
+        window. Enable it per-run (``--passport-reference background``) and
+        re-benchmark before trusting it.
     """
 
     def __init__(
@@ -161,6 +186,8 @@ class SpectralHologramDistiller:
         critical_threshold: float | None = None,
         auto_band_ratio: bool = False,
         lattice_rebuild_interval: int = 0,
+        peak_z_threshold: float = 2.0,
+        passport_reference: str = "stream",
     ):
         if tail not in ("high", "low", "both"):
             raise ValueError(f"tail must be 'high', 'low' or 'both', got {tail!r}")
@@ -200,16 +227,40 @@ class SpectralHologramDistiller:
         self.herding_mix = float(herding_mix)
         self.use_residual = bool(use_residual)
         self.critical_threshold = None if critical_threshold is None else float(critical_threshold)
+        if self.critical_threshold is not None and tail == "low":
+            # The critical band is selected by y >= critical_threshold (the
+            # UPPER side of the target), while tail="low" makes the loader
+            # serve the LOWEST medoids as the phase-peak band. The two
+            # contradict each other: the crystal is built from the high side
+            # and read back from the low side (measured: band built from
+            # y >= 1.0, slice returned y in [-2.31, -0.69]).
+            raise ValueError(
+                "critical_threshold selects the UPPER target side (y >= "
+                "threshold) but tail='low' serves the LOWEST medoids; use "
+                "tail='high' (or 'both') together with critical_threshold, or "
+                "drop critical_threshold"
+            )
         self.auto_band_ratio = bool(auto_band_ratio)
         self.lattice_rebuild_interval = int(lattice_rebuild_interval)
         if self.lattice_rebuild_interval < 0:
             raise ValueError(
                 f"lattice_rebuild_interval must be >= 0, got {lattice_rebuild_interval}"
             )
+        self.peak_z_threshold = float(peak_z_threshold)
+        if passport_reference not in ("background", "stream"):
+            raise ValueError(
+                f"passport_reference must be 'background' or 'stream', got {passport_reference!r}"
+            )
+        self.passport_reference = passport_reference
         self.rng = np.random.default_rng(random_state)
 
         self.n_seen = 0
         self.Psi_sum = np.zeros((self.k, self.k), dtype=np.float64)
+        # Background-only accumulator: second moment of the sketch rows that
+        # did NOT trigger the phase-peak score. Used for the passport when
+        # passport_reference="background" (see the class docstring).
+        self.Psi_bg_sum = np.zeros((self.k, self.k), dtype=np.float64)
+        self.n_bg = 0
         self.Phi_sum = None
         self._proj_initialized = False
         self.unsupervised_mode = False
@@ -222,7 +273,12 @@ class SpectralHologramDistiller:
         # Reservoir of streamed rows used to REBUILD the lattice once the stream
         # has grown past the warm-up window (see lattice_rebuild_interval).
         # Bounded by max_init_buffer rows so memory stays O(k^2 + d + reservoir).
-        self.res_Z, self.res_X, self.res_Y, self.res_U, self.res_score = [], [], [], [], []
+        self.res_peak_Z, self.res_peak_X, self.res_peak_Y = [], [], []
+        self.res_peak_U, self.res_peak_score = [], []
+        self.res_bg_Z, self.res_bg_X, self.res_bg_Y = [], [], []
+        self.res_bg_U, self.res_bg_score = [], []
+        self._res_peak_rows = 0
+        self._res_bg_rows = 0
         self._reservoir_rows = 0
         self._rows_since_rebuild = 0
 
@@ -409,33 +465,93 @@ class SpectralHologramDistiller:
         were computed against the same trigger definition, so the percentile
         split stays meaningful.
         """
-        if not self.res_X:
+        if not self.res_bg_X and not self.res_peak_X:
             return False
-        self.init_Z = [np.vstack(self.res_Z)]
-        self.init_X = [np.vstack(self.res_X)]
-        self.init_Y = [np.vstack(self.res_Y)]
-        self.init_U = [np.vstack(self.res_U)]
-        self.init_score = [np.concatenate(self.res_score)]
+        parts_Z, parts_X, parts_Y, parts_U, parts_score = [], [], [], [], []
+        for store in ("peak", "bg"):
+            Zs = getattr(self, f"res_{store}_Z")
+            Xs = getattr(self, f"res_{store}_X")
+            if not Xs:
+                continue
+            parts_Z.append(np.vstack(Zs))
+            parts_X.append(np.vstack(Xs))
+            parts_Y.append(np.vstack(getattr(self, f"res_{store}_Y")))
+            parts_U.append(np.vstack(getattr(self, f"res_{store}_U")))
+            parts_score.append(np.concatenate(getattr(self, f"res_{store}_score")))
+        self.init_Z = [np.vstack(parts_Z)]
+        self.init_X = [np.vstack(parts_X)]
+        self.init_Y = [np.vstack(parts_Y)]
+        self.init_U = [np.vstack(parts_U)]
+        self.init_score = [np.concatenate(parts_score)]
         self._build_phase_manifold_lattice()
         self._rows_since_rebuild = 0
         return True
 
     def _reservoir_add(self, Z_B, X_B, y_B, U_B, score_B):
-        """Append a batch to the bounded reservoir, evicting the oldest rows."""
+        """Append a batch to the bounded reservoir.
+
+        The reservoir is split in two strata so that the retained sample
+        represents the WHOLE stream rather than only its most recent rows:
+
+        * the *peak* stratum keeps every row whose standardised target is
+          above ``peak_z_threshold`` (the critical / rare regime). Such rows
+          are rare by construction, so the stratum rarely fills, and a regime
+          that appears LATE in the stream is still represented;
+        * the *background* stratum keeps the most recent rows up to its cap.
+
+        This is what makes a lattice rebuild able to cover late regimes while
+        memory stays bounded by ``max_init_buffer`` rows.
+        """
         cap = int(self.max_init_buffer)
-        self.res_Z.append(np.array(Z_B, dtype=np.float64, copy=True))
-        self.res_X.append(np.array(X_B, dtype=np.float64, copy=True))
-        self.res_Y.append(np.array(y_B, dtype=np.float64, copy=True))
-        self.res_U.append(np.array(U_B, dtype=np.float64, copy=True))
-        self.res_score.append(np.array(score_B, dtype=np.float64, copy=True))
-        self._reservoir_rows += len(X_B)
-        # Evict the oldest rows once the reservoir exceeds the cap. Dropping
-        # whole leading batches keeps the reservoir contiguous and cheap.
-        while self._reservoir_rows > cap and len(self.res_X) > 1:
-            first = self.res_X[0]
-            self._reservoir_rows -= len(first)
-            self.res_Z.pop(0); self.res_X.pop(0); self.res_Y.pop(0)
-            self.res_U.pop(0); self.res_score.pop(0)
+        peak_cap = max(1, int(cap * 0.4))
+        bg_cap = max(1, cap - peak_cap)
+
+        y_flat = np.asarray(y_B, dtype=np.float64).reshape(-1)
+        y_z = np.abs((y_flat - self.y_mean) / self.y_std) if len(y_flat) else np.zeros(0)
+        is_peak = y_z > float(self.peak_z_threshold)
+        if len(y_flat) != len(X_B):
+            is_peak = np.zeros(len(X_B), dtype=bool)
+
+        for mask, store in ((is_peak, "peak"), (~is_peak, "bg")):
+            if not np.any(mask):
+                continue
+            idx = np.nonzero(mask)[0]
+            if store == "peak":
+                room = peak_cap - self._res_peak_rows
+                if room <= 0:
+                    continue
+                idx = idx[:room]
+            else:
+                room = bg_cap - self._res_bg_rows
+                if room <= 0:
+                    # Background rows are dropped from the front: the reservoir
+                    # keeps the most recent background, and the peak stratum
+                    # carries the long-tail coverage.
+                    while self._res_bg_rows > 0 and self._res_bg_rows + len(idx) > bg_cap:
+                        self._res_bg_rows -= len(self.res_bg_X[0])
+                        self.res_bg_Z.pop(0); self.res_bg_X.pop(0)
+                        self.res_bg_Y.pop(0); self.res_bg_U.pop(0)
+                        self.res_bg_score.pop(0)
+                    room = bg_cap - self._res_bg_rows
+                    if room <= 0:
+                        continue
+                    idx = idx[:room]
+
+            if store == "peak":
+                self.res_peak_Z.append(np.array(Z_B[idx], dtype=np.float64, copy=True))
+                self.res_peak_X.append(np.array(X_B[idx], dtype=np.float64, copy=True))
+                self.res_peak_Y.append(np.array(y_B[idx], dtype=np.float64, copy=True))
+                self.res_peak_U.append(np.array(U_B[idx], dtype=np.float64, copy=True))
+                self.res_peak_score.append(np.array(score_B[idx], dtype=np.float64, copy=True))
+                self._res_peak_rows += len(idx)
+            else:
+                self.res_bg_Z.append(np.array(Z_B[idx], dtype=np.float64, copy=True))
+                self.res_bg_X.append(np.array(X_B[idx], dtype=np.float64, copy=True))
+                self.res_bg_Y.append(np.array(y_B[idx], dtype=np.float64, copy=True))
+                self.res_bg_U.append(np.array(U_B[idx], dtype=np.float64, copy=True))
+                self.res_bg_score.append(np.array(score_B[idx], dtype=np.float64, copy=True))
+                self._res_bg_rows += len(idx)
+        self._reservoir_rows = self._res_peak_rows + self._res_bg_rows
 
     # --- public API -----------------------------------------------------------
 
@@ -591,6 +707,9 @@ class SpectralHologramDistiller:
             L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
             W_pred = linalg.cho_solve(L_low, Phi_hat)
 
+        # Background accumulator for the passport reference. The phase score is
+        # only known after the residual is computed, so this runs below the
+        # score computation (see _accumulate_background).
         # Adaptive y-statistics (opt-in): once the lattice exists, keep the
         # kappa*y phase coordinate calibrated under target drift. During the
         # warm-up the frozen first-batch statistics are kept, so buffered phase
@@ -627,6 +746,20 @@ class SpectralHologramDistiller:
         # np.atleast_1d: a single-row batch squeezes y_z to a 0-d array, which
         # would later crash np.concatenate on the buffered phase scores.
         phase_score = np.atleast_1d((res_ratio if self.use_residual else 0.0) + 2.0 * (y_z ** 2))
+
+        # Background accumulator for the passport reference: keep the sketch
+        # rows that did NOT trigger the phase-peak score. The cut is the same
+        # percentile the lattice uses, so "background" means the same thing in
+        # both places. Rows are classified per batch; a batch whose median
+        # score already sits above the cut contributes nothing, which is the
+        # safe behaviour (a wholly shifted batch must not become the
+        # reference).
+        if self.passport_reference == "background":
+            thr_bg = float(np.percentile(phase_score, self.tail_q))
+            bg_mask = phase_score < thr_bg
+            if np.any(bg_mask):
+                self.Psi_bg_sum += U_B[bg_mask].T @ U_B[bg_mask]
+                self.n_bg += int(np.sum(bg_mask))
 
         # Retain a bounded sample of every row for a later lattice rebuild.
         # This is what lets a rare regime that appears LATE in the stream reach
@@ -826,7 +959,14 @@ class SpectralHologramDistiller:
                 "has no herding weights to write"
             )
         Psi_hat = self.Psi_sum / self.n_seen
-        eigvals, eigvecs = linalg.eigh(Psi_hat)
+        if self.passport_reference == "background" and self.n_bg > 0:
+            # The passport describes the BACKGROUND regime. A regime that
+            # occupies part of the training data must not become part of the
+            # reference, or the radar flags normal windows as shifted.
+            Psi_ref = self.Psi_bg_sum / self.n_bg
+        else:
+            Psi_ref = Psi_hat
+        eigvals, eigvecs = linalg.eigh(Psi_ref)
         payload = dict(
             crystal_X=self.crystal_X.astype(np.float32),
             crystal_Y=self.crystal_Y.astype(np.float32),
@@ -839,6 +979,8 @@ class SpectralHologramDistiller:
             tail=np.array(self.tail),
             include_deltas=np.array(bool(self.include_deltas)),
             high_band_ratio=np.array([float(self.high_band_ratio)], dtype=np.float64),
+            passport_reference=np.array(self.passport_reference),
+            y_labelled=np.ones(len(self.crystal_Y), dtype=bool),
         )
         if include_projector:
             payload["Omega"] = self.Omega.astype(np.float32)
@@ -874,6 +1016,20 @@ class HologramCrystalLoader:
         self.X_std = data["X_std"].astype(np.float64)
         self.n_seen = int(data["n_seen"][0])
 
+        # Which rows carry a real target. Legacy artifacts predate the field:
+        # every row is treated as labelled.
+        if "y_labelled" in data.files:
+            self.y_labelled = np.asarray(data["y_labelled"], dtype=bool).reshape(-1)
+            if len(self.y_labelled) != len(self.y):
+                raise ValueError(
+                    f"artifact declares y_labelled of length {len(self.y_labelled)} "
+                    f"but crystal_Y has {len(self.y)} rows; the artifact is inconsistent"
+                )
+        else:
+            self.y_labelled = np.ones(len(self.y), dtype=bool)
+        self._has_real_targets = bool(np.any(self.y_labelled))
+        self._target_placeholder = float(np.median(self.y[self.y_labelled])) if self._has_real_targets else 0.0
+
         self.k_dim = self.eigvecs.shape[0]
         if "tail" in data.files:
             self.tail = str(np.asarray(data["tail"]).item())
@@ -906,6 +1062,14 @@ class HologramCrystalLoader:
         else:
             self.high_band_ratio = 0.26
 
+        # Which population the passport describes. Legacy artifacts predate
+        # the field and were built over the whole stream.
+        if "passport_reference" in data.files:
+            ref = str(np.asarray(data["passport_reference"]).item())
+            self.passport_reference = ref if ref in ("background", "stream") else "stream"
+        else:
+            self.passport_reference = "stream"
+
         self._prev_row = None  # last raw row of the previous streaming radar call
 
         if "Omega" in data.files:
@@ -926,7 +1090,12 @@ class HologramCrystalLoader:
             return np.ones_like(self.weights)
         raise ValueError(f"weighting must be 'gamma' or 'uniform', got {weighting!r}")
 
-    def get_training_data(self, budget_points: int | None = None, weighting: str = "gamma"):
+    def get_training_data(
+        self,
+        budget_points: int | None = None,
+        weighting: str = "gamma",
+        drop_unlabelled: bool = True,
+    ):
         """Return (X, y, sample_weight) for the chosen medoid budget (anytime mode).
 
         ``weighting="gamma"`` (default) returns the FISTA/Voronoi weights;
@@ -934,17 +1103,49 @@ class HologramCrystalLoader:
         ``bench_weights.py`` shows this is a global/critical trade-off: gamma
         improves global KRR, while uniform can be better on the critical regime
         for some datasets (notably the 4D reactor).
+
+        ``drop_unlabelled=True`` (the default since v3.11.1) removes the rows
+        that were injected by a label-free ``heal_domain_shift``: they carry a
+        neutral placeholder in ``y`` (the crystal's median target) rather than
+        a measured value, and training on the placeholder would bias the
+        model. Crystals without placeholder rows are unaffected, so this
+        changes no published benchmark number.
         """
         w_all = self._select_weights(weighting)
-        if budget_points is None or budget_points >= len(self.X):
-            return self.X, self.y, w_all
-        w_sub = w_all[:budget_points].copy()
-        w_sub /= np.mean(w_sub)
-        return self.X[:budget_points], self.y[:budget_points], w_sub
+        X, y, w = self.X, self.y, w_all
+        labelled = self.y_labelled
+        if budget_points is not None and budget_points < len(X):
+            if int(budget_points) < 1:
+                raise ValueError(f"budget_points must be >= 1, got {budget_points}")
+            # v3.11.1: the phase-peak band is admitted FIRST, then the largest
+            # background cells. Crystal rows are stored sorted by cell count,
+            # so a plain head slice spent the whole budget on background and
+            # starved the rare regime the crystal exists to preserve
+            # (measured on a 200-medoid crystal with a 60-row peak band: a
+            # budget of 100 kept only 4 peak rows).
+            peak = self._peak_rank_idx(len(self.y), float(self.high_band_ratio))
+            chosen = [int(i) for i in peak[:budget_points]]
+            if len(chosen) < budget_points:
+                taken = set(chosen)
+                for i in range(len(X)):
+                    if i not in taken:
+                        chosen.append(i)
+                        if len(chosen) == budget_points:
+                            break
+            idx = np.asarray(chosen, dtype=np.int64)
+            X, y, w = X[idx], y[idx], w[idx]
+            labelled = labelled[idx]
+        if drop_unlabelled and not np.all(labelled):
+            keep = labelled
+            X, y, w = X[keep], y[keep], w[keep]
+        if len(X) != len(self.X):
+            w = w.copy()
+            w /= np.mean(w)
+        return X, y, w
 
     def get_phase_peak_slice(
         self,
-        high_band_ratio: float = 0.26,
+        high_band_ratio: float | None = None,
         y_threshold: float | None = None,
         weighting: str = "gamma",
     ):
@@ -963,7 +1164,16 @@ class HologramCrystalLoader:
         ``weighting="gamma"`` (default) returns the crystal's FISTA/Voronoi
         weights; ``weighting="uniform"`` returns ones for deployments where the
         critical regime is the only objective (see ``bench_weights.py``).
+
+        ``high_band_ratio`` defaults to the crystal's persisted band ratio
+        (v3.11.1), so the slice and the heal's protected band always agree.
         """
+        # v3.11.1: the default follows the crystal's PERSISTED band ratio.
+        # The old hard-coded 0.26 silently disagreed with the ratio the
+        # crystal was built with (and with the ratio heal protects), so a
+        # critical-first crystal (br=0.65) returned a band 2.5x too narrow.
+        if high_band_ratio is None:
+            high_band_ratio = float(self.high_band_ratio)
         if y_threshold is not None:
             mask = self.y >= float(y_threshold)
             if not np.any(mask):
@@ -1320,16 +1530,40 @@ class HologramCrystalLoader:
             # reshape(-1), not squeeze: a single-row window's (1,) y would
             # squeeze to a 0-d array and 0-d[med_idx] raises IndexError.
             y_patch = y_arr[med_idx].copy()
+            labelled_patch = np.ones(len(med_idx), dtype=bool)
         else:
-            # Unsupervised fallback: spectral novelty score against current passport
-            proj = U_new[med_idx] @ self.eigvecs
-            y_patch = np.sum(U_new[med_idx] ** 2, axis=1) - np.sum(proj ** 2, axis=1)
+            # Unsupervised fallback: spectral novelty score against current passport.
+            #
+            # This is NOT a target value -- it lives on a different scale from
+            # the real targets already stored in crystal_Y. Writing it into the
+            # same column silently produced a crystal whose targets were a
+            # mixture of two incompatible quantities (measured: real targets
+            # in [84.9, 113.0] next to novelty scores in [0.66, 0.91]), which
+            # breaks get_training_data() for any downstream model.
+            #
+            # A crystal distilled WITHOUT labels has no real targets at all, so
+            # its column already holds the synthetic novelty coordinate and the
+            # injected rows are consistent with it. A crystal distilled WITH
+            # labels gets a neutral placeholder instead, and the row is marked
+            # unlabelled so the loader can drop it on request.
+            if self._has_real_targets:
+                y_patch = np.full(len(med_idx), self._target_placeholder, dtype=np.float64)
+                labelled_patch = np.zeros(len(med_idx), dtype=bool)
+            else:
+                proj = U_new[med_idx] @ self.eigvecs
+                y_patch = np.sum(U_new[med_idx] ** 2, axis=1) - np.sum(proj ** 2, axis=1)
+                labelled_patch = np.ones(len(med_idx), dtype=bool)
 
         n_old = len(self.X)
         self.X = np.vstack([self.X, X_patch])
         self.y = np.concatenate([self.y, np.atleast_1d(y_patch)])
         w_all = np.concatenate([self.weights, w_patch])
         self.weights = w_all / np.mean(w_all)
+        # Track which rows carry a real target, so a downstream model can drop
+        # the unlabelled ones instead of training on placeholder values.
+        self.y_labelled = np.concatenate(
+            [self.y_labelled, np.asarray(labelled_patch, dtype=bool)]
+        )
 
         n_pruned = 0
         if max_crystal_size is not None and len(self.X) > int(max_crystal_size):
@@ -1374,6 +1608,7 @@ class HologramCrystalLoader:
                 self.X = self.X[keep_mask]
                 self.y = self.y[keep_mask]
                 self.weights = self.weights[keep_mask]
+                self.y_labelled = self.y_labelled[keep_mask]
                 nearest = np.argmin(cdist(X_drop, self.X, metric="sqeuclidean"), axis=1)
                 np.add.at(self.weights, nearest, w_drop)
                 self.weights /= np.mean(self.weights)
@@ -1408,6 +1643,13 @@ class HologramCrystalLoader:
             "healed": True,
             "n_injected": int(n_sel),
             "n_pruned": int(n_pruned),
+            "n_unlabelled_injected": int(np.sum(~np.asarray(labelled_patch, dtype=bool))),
+            "warning": (
+                "label-free heal: the injected rows carry a placeholder target, "
+                "not a measured one; drop them with get_training_data("
+                "drop_unlabelled=True) (the default since v3.11.1)"
+                if y_new_stream is None else None
+            ),
             "bw_before": shift["bw_distance"],
             "bw_after": after["bw_distance"],
             "latency_ms": (time.perf_counter() - t0) * 1000.0,
@@ -1431,6 +1673,8 @@ class HologramCrystalLoader:
             tail=np.array(self.tail),
             include_deltas=np.array(bool(self.include_deltas)),
             high_band_ratio=np.array([float(self.high_band_ratio)], dtype=np.float64),
+            passport_reference=np.array(self.passport_reference),
+            y_labelled=self.y_labelled.astype(bool),
         )
         if self.Omega is not None and self.phase is not None:
             payload["Omega"] = self.Omega.astype(np.float32)
@@ -1453,6 +1697,8 @@ class HologramCrystalLoader:
             "tail": self.tail,
             "include_deltas": bool(self.include_deltas),
             "has_projector": bool(self.Omega is not None),
+            "passport_reference": self.passport_reference,
+            "n_unlabelled": int(np.sum(~self.y_labelled)),
             "y_min": float(np.min(self.y)),
             "y_median": float(np.median(self.y)),
             "y_max": float(np.max(self.y)),

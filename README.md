@@ -1,10 +1,26 @@
-# Spectral Hologram Distiller (SHD v3.11.0 working tree)
+# Spectral Hologram Distiller (SHD v3.11.1)
 
-> **Repair status:** this working tree includes core/CLI fixes and watch protocol
-> v2. Published JSONs below are historical experiments, not reruns of these
-> changes. In particular, old Metro budget claims and oversize latency labels
-> are invalid; see §9 and `ARTIFACTS.md`. No new release or benchmark parity is
-> implied by the version string.
+> **Repair status (v3.11.1, 2026-10-21):** the v3.11.0 code review found and
+> fixed four defects in this tree, each reproduced before the fix:
+> the anytime budget (`get_training_data(budget_points=...)`) spent its whole
+> budget on background cells and starved the phase-peak band; the peak slice
+> ignored the crystal's persisted `high_band_ratio`; a label-free heal wrote
+> placeholder targets without saying so; and `critical_threshold` combined
+> with `tail="low"` produced a self-contradictory crystal. The experimental
+> background-only spectral passport is now opt-in
+> (`--passport-reference background`) instead of the default, because it
+> changes the radar's sensitivity and the published artifacts were distilled
+> with the stream reference. Regression tests for all five live in
+> `tests/test_v311_repairs.py`.
+
+> **v3.11.0:** `shd_watch.py` (learn/calibrate/watch, protocol v2) with the
+> honest MetroPT-3 negative result, the Scania APS official-cost benchmark, the
+> corrected latency artifact, bank scaling, the PM2.5 rehab + 300-medoid
+> guard, `ARTIFACTS.md` / `PITCH.md` / `EMAIL_ENGINEER.md`, and the paper
+> update. Published JSONs below are historical experiments, not reruns of
+> these changes. In particular, old Metro budget claims and oversize latency
+> labels are invalid; see §9 and `ARTIFACTS.md`. No new release or benchmark
+> parity is implied by the version string.
 
 > **v3.10.0:** `DomainBank` (per-domain crystals + nearest-passport routing),
 > `passport_recalibrate=True` for single-crystal heals, `weighting="uniform"` on
@@ -705,7 +721,7 @@ needs a different detector design, not a defence of this one.
 - **Forgetting is real for a single crystal, bounded for a bank.** Repeated
   `heal_domain_shift` on one crystal degrades the original regime monotonically
   (RMSE 0.265 → 0.549 over nine shifts at strong drift, ×2.07; see §4b). Do not
-  describe this path as "zero catastrophic forgetting". `DomainBank` retains
+  describe this path as "forgetting-free". `DomainBank` retains
   perfectly because nothing is overwritten, at 14 KB per regime — but its
   passport routing is only exact when regimes are meaningfully separated
   (accuracy 1.00 at drift ≥ 0.5, 0.60 when regimes are nearly identical).
