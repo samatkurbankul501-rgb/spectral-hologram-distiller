@@ -38,6 +38,7 @@ Regenerate any entry with the script named in the same row, from the repo root.
 | Artifact | Script | Question answered |
 | :--- | :--- | :--- |
 | `bench_passport_results.json` | `bench_passport.py` | Historical result: three-way passport trade-off (blend / recalibrate / bank). New runs default to separate `bench_passport_v2_results.json`. |
+| `bench_passport_reference_results.json` | `bench_passport_reference.py` | 2026-10-21: does the background-only passport fix the reference contamination? **No** — it changes no qualitative outcome. Synthetic (10 seeds): the contamination penalty appears only at 40% contamination, where the passport is degenerate (in-sample windows alarm too). Beijing PM2.5 (5 seeds, truncated local cache): the radar alarms on in-sample windows as well, for both references, with the repository's 14-feature set and with sensors only. Read README "Known limitations". |
 | `bench_weights_reactor_results.json` | `bench_weights.py` | Gamma vs uniform weights, reactor, 20 seeds. |
 | `bench_weights_superconduct_results.json` | `bench_weights.py` | Gamma vs uniform weights, superconductivity, 20 seeds. |
 | `bench_gaps_results.json` | `bench_gaps.py` | Closes the KT-subsample confound: SHD on the *same* 4,800 rows KT sees. |

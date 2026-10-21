@@ -1,0 +1,28 @@
+A) radar with a SINGLE row (B=1):
+   B=  1: BW=0.83737 thr=0.68000 shifted=True
+   B=  2: BW=0.77860 thr=0.68000 shifted=True
+   B=  4: BW=0.67846 thr=0.68000 shifted=False
+   B= 16: BW=0.43820 thr=0.68000 shifted=False
+   B= 64: BW=0.19173 thr=0.34000 shifted=False
+   => the adaptive threshold widens as 0.085*sqrt(1024/B); a 1-row window
+      needs 0.85 to be quiet, so single-row scoring is nearly useless.
+
+B) get_phase_peak_slice vs the crystal's own tail mode:
+   slice size = 39 (26% of 150)
+   y range of the slice: [5.416 .. 11.504], crystal y range [-5.022 .. 11.504]
+   are these the top-y rows?  True
+
+C) the phase-peak band vs the CRITICAL band (they are not the same set):
+   crystal rows above the stream's 97th percentile: 4
+   rows in get_phase_peak_slice():                39
+   overlap: 4
+
+D) empty / single-column inputs:
+   one feature  -> OK, crystal 10
+   one row      -> OK, crystal 1
+
+E) does the loader validate that the artifact's own X matches its own X_mean?
+   crystal_X rows are raw feature values (not normalised): crystal_X[0][:3] = [-0.105  0.507  0.246]
+   X_mean[:3] = [0.154 0.144 0.154]  X_std[:3] = [1.055 1.025 1.045]
+   -> the radar normalises the STREAM with (X_mean, X_std) but the crystal
+      rows stay raw; mixing the two in one array is a silent trap.

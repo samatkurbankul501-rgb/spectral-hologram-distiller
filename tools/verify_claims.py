@@ -262,6 +262,31 @@ for text in [
 for needle in ["zero catastrophic", "M = 90", "sub-millisecond", "8.7%", "56.0"]:
     check_absent("readme stale " + needle, needle, README)
 
+# ------------------------------------------------- passport-reference benchmark
+pr = load("bench_passport_reference_results.json")
+syn = pr["arms"]["synthetic"]
+pm_full = pr["arms"]["pm25_full"]
+pm_sens = pr["arms"]["pm25_sensors"]
+# Synthetic: the contamination penalty only shows up at 40% contamination...
+check("passport-ref syn f0.10 stream FA", syn["stream_f0.10"]["fa_rate_median"], 0.0, 0.001)
+check("passport-ref syn f0.10 detect", syn["stream_f0.10"]["detect_median"], 1.0, 0.001)
+check("passport-ref syn f0.40 stream FA", syn["stream_f0.40"]["fa_rate_median"], 1.0, 0.001)
+# ...and there the passport is degenerate (in-sample windows alarm too).
+check("passport-ref syn f0.40 in-sample FA", syn["stream_f0.40"]["insample_fa_median"], 1.0, 0.001)
+check("passport-ref syn f0.00 in-sample FA", syn["stream_f0.00"]["insample_fa_median"], 0.0, 0.001)
+# PM2.5: degenerate for both references and both feature sets.
+check("passport-ref pm25 full stream FA", pm_full["stream_f0.00"]["fa_rate_median"], 1.0, 0.001)
+check("passport-ref pm25 full in-sample FA", pm_full["stream_f0.00"]["insample_fa_median"], 1.0, 0.001)
+check("passport-ref pm25 sensors stream FA", pm_sens["stream_f0.00"]["fa_rate_median"], 1.0, 0.001)
+check("passport-ref pm25 sensors in-sample FA", pm_sens["stream_f0.00"]["insample_fa_median"], 1.0, 0.001)
+# The background reference must not be reported as a remedy.
+check("passport-ref verdict pm25 label",
+      1 if pr["verdict"]["pm25_full_f0.00"]["label"] == "both_broken_fa_1.00" else 0, 1, 0)
+check_text("readme claims the negative result",
+           "background-only spectral passport is not a fix", README)
+for text in ["background passport fixes", "background-only passport fixes"]:
+    check_absent("readme overclaims " + text, text, README)
+
 # ---------------------------------------------------------------- artifact/version
 art = np.load(ROOT / "artifacts" / "superconduct_v37.hologram.npz", allow_pickle=False)
 check("artifact medoids", art["crystal_X"].shape[0], 300, 0)

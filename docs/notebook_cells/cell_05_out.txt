@@ -1,0 +1,4 @@
+ERROR: SyntaxError: invalid syntax (1535399142.py, line 393)[0;36m  File [0;32m"/tmp/ipykernel_755/1535399142.py"[0;36m, line [0;32m393[0m
+[0;31m    scaler_ global = StandardScaler().fit(X_train_stream)[0m
+[0m            ^[0m
+[0;31mSyntaxError[0m[0;31m:[0m invalid syntax

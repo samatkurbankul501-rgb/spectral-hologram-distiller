@@ -10,8 +10,12 @@
 > background-only spectral passport is now opt-in
 > (`--passport-reference background`) instead of the default, because it
 > changes the radar's sensitivity and the published artifacts were distilled
-> with the stream reference. Regression tests for all five live in
-> `tests/test_v311_repairs.py`.
+> with the stream reference. A controlled benchmark
+> (`bench_passport_reference.py`) then measured that the background reference
+> changes no outcome and does not repair the early-warning failure, so it
+> stays experimental — see "Known limitations". Regression tests for all five
+> live in `tests/test_v311_repairs.py`, and the whole workspace's audit chain
+> now lives in this repository (`tools/`, `docs/MIGRATION.md`).
 
 > **v3.11.0:** `shd_watch.py` (learn/calibrate/watch, protocol v2) with the
 > honest MetroPT-3 negative result, the Scania APS official-cost benchmark, the
@@ -703,6 +707,28 @@ survive the corrected protocol; any SHD claim about compressor early warning
 needs a different detector design, not a defence of this one.
 
 ## Known limitations
+
+- **Negative result: the background-only spectral passport is not a fix.**
+  `passport_reference="background"` was added because a whole-stream passport
+  absorbs a shifted regime that occupies part of the training data. Measured
+  under a controlled protocol (`bench_passport_reference.py`; evaluation
+  windows held out from the training stream; 10 seeds synthetic, 5 seeds on
+  the Beijing PM2.5 cache):
+  - *Synthetic*: the contamination penalty appears only at **40%**
+    contamination (BW 0.205 against a 0.157 threshold), and there the passport
+    is **degenerate** — windows taken from the training stream alarm as well
+    (in-sample FA 1.00). At 10% and 20% contamination nothing alarms
+    (FA 0.00, detection 1.00). The background reference moves the distances by
+    less than 0.01 and changes no outcome.
+  - *Beijing PM2.5*: the radar alarms on **in-sample** windows as well
+    (FA 1.00 for windows that are part of the training stream), with the
+    repository's 14-feature set and with sensors only. That is not reference
+    contamination: at these settings the detector is degenerate on this
+    telemetry independently of which population the reference describes.
+
+  The background reference therefore stays **opt-in**
+  (`--passport-reference background`), is never the default, and must not be
+  presented as a remedy for the early-warning failure.
 
 - **Negative result: Beijing PM2.5 (real sensor telemetry, time-ordered split).**
   This is the second real dataset and the method **does not** recommend itself for

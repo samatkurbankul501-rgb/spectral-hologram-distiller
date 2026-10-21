@@ -1,0 +1,41 @@
+========================================================================================
+ТЕСТ 3: НЕЙРОСЕТИ НА КРИСТАЛЛЕ С ОПТИМИЗАЦИЕЙ ВТОРОГО ПОРЯДКА (L-BFGS) И PYTORCH
+========================================================================================
+Архитектура и выборка (200 точек)      | MSE (Норма)  | MSE (Пик)    | R² (Пик)   | Время
+----------------------------------------------------------------------------------------
+
+/usr/local/lib/python3.13/dist-packages/sklearn/neural_network/_multilayer_perceptron.py:546: ConvergenceWarning: lbfgs failed to converge (status=1):
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT.
+
+Increase the number of iterations (max_iter) or scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+  self.n_iter_ = _check_optimize_result("lbfgs", opt_res, self.max_iter)
+
+MLP (L-BFGS) + Random (0.2%)           | 0.0534       | 2.9137       | 0.6842     | 2368.3 мс
+
+/usr/local/lib/python3.13/dist-packages/sklearn/neural_network/_multilayer_perceptron.py:546: ConvergenceWarning: lbfgs failed to converge (status=1):
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT.
+
+Increase the number of iterations (max_iter) or scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+  self.n_iter_ = _check_optimize_result("lbfgs", opt_res, self.max_iter)
+
+MLP (L-BFGS) + K-Means (0.2%)          | 0.0299       | 3.5617       | 0.6140     | 4081.0 мс
+
+/usr/local/lib/python3.13/dist-packages/sklearn/neural_network/_multilayer_perceptron.py:546: ConvergenceWarning: lbfgs failed to converge (status=1):
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT.
+
+Increase the number of iterations (max_iter) or scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+  self.n_iter_ = _check_optimize_result("lbfgs", opt_res, self.max_iter)
+
+MLP (L-BFGS) + Spectral Hologram v3.3  | 0.0341       | 0.7382       | 0.9200     | 1966.8 мс
+PyTorch Weighted MLP + Hologram v3.3   | 0.0929       | 0.6214       | 0.9326     | 6536.1 мс
+
+========================================================================================
+ТЕСТ 4: АВТОМАТИЧЕСКОЕ САМОИСЦЕЛЕНИЕ КРИСТАЛЛА ПОСЛЕ ТРЕВОГИ РАДАРА (SELF-HEALING)
+========================================================================================
+Радар BW = 0.8508 -> ТРЕВОГА! Запущена хирургическая дозапись 35 медоидов (86.9 мс)
+Точность R² на НОВОЙ аномалии ДО исцеления:     -9.7184 (Слепая зона)
+Точность R² на НОВОЙ аномалии ПОСЛЕ исцеления:  0.9541 (Полный захват нового режима!)
+Точность R² на СТАРОМ пике ПОСЛЕ исцеления:     0.9108 (0% катастрофического забывания!)
