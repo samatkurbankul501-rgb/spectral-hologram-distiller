@@ -1,4 +1,4 @@
-"""Command-line interface for Spectral Hologram Distiller (SHD v3.9.1).
+"""Command-line interface for Spectral Hologram Distiller (SHD v3.11.0).
 
 Usage examples:
     python -m shd inspect artifacts/superconduct_v37.hologram.npz
@@ -35,10 +35,16 @@ def _load_tabular(path: str, target_col: int | None = None, delimiter: str | Non
             # through to the target-column split when the NPZ has no y.
             if y_raw is not None or target_col is None:
                 return X_raw, y_raw
-        else:
-            first_key = data.files[0]
-            X_raw = data[first_key].astype(np.float64)
+        elif len(data.files) == 1:
+            X_raw = data[data.files[0]].astype(np.float64)
             y_raw = None
+        else:
+            # Ambiguity is dangerous here: silently scoring e.g. an integer
+            # "labels" array as the feature matrix produces nonsense reports.
+            raise ValueError(
+                f"{path} contains several arrays {sorted(data.files)} and no 'X' "
+                "key; save the feature matrix under the key 'X' (optional 'y')"
+            )
     else:
         sep = delimiter if delimiter is not None else ("," if ext != ".tsv" else "\t")
         with open(path, "r", encoding="utf-8") as f:
@@ -50,13 +56,17 @@ def _load_tabular(path: str, target_col: int | None = None, delimiter: str | Non
                 float(tok)
         except ValueError:
             has_header = True
-        X_raw = np.loadtxt(path, delimiter=sep, skiprows=1 if has_header else 0, dtype=np.float64)
-        if X_raw.ndim == 1:
-            X_raw = X_raw[:, None]
+        # ndmin=2: a single-row CSV would otherwise load as a 1-D array of
+        # features and be silently reinterpreted as a one-column dataset.
+        X_raw = np.loadtxt(
+            path, delimiter=sep, skiprows=1 if has_header else 0, dtype=np.float64, ndmin=2
+        )
         y_raw = None
 
     if X_raw.ndim == 1:
         X_raw = X_raw[:, None]
+    if X_raw.size == 0 or X_raw.shape[0] == 0:
+        raise ValueError(f"{path} contains no data rows")
     if target_col is not None and y_raw is None:
         idx = target_col if target_col >= 0 else (X_raw.shape[1] + target_col)
         if idx < 0 or idx >= X_raw.shape[1]:
@@ -64,6 +74,11 @@ def _load_tabular(path: str, target_col: int | None = None, delimiter: str | Non
         y_raw = X_raw[:, idx].copy()
         keep = [j for j in range(X_raw.shape[1]) if j != idx]
         X_raw = X_raw[:, keep].copy()
+        if X_raw.shape[1] == 0:
+            raise ValueError(
+                f"cannot strip target column {target_col}: the input has a single "
+                "column, so no features would remain"
+            )
 
     return X_raw, y_raw
 
@@ -145,7 +160,7 @@ def cmd_heal(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="shd", description="Spectral Hologram Distiller (SHD v3.9.1) CLI")
+    p = argparse.ArgumentParser(prog="shd", description="Spectral Hologram Distiller (SHD v3.11.0) CLI")
     sub = p.add_subparsers(dest="command", required=True)
 
     p_ins = sub.add_parser("inspect", help="Inspect a .hologram.npz crystal")

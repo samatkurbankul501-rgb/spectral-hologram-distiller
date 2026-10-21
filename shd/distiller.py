@@ -118,6 +118,23 @@ class SpectralHologramDistiller:
         ``auto_band_ratio=True`` then allocates cells in proportion to the
         observed critical fraction (clipped to 10%-30%); this is the
         critical-aware mode for domains with a known alarm threshold.
+    lattice_rebuild_interval : int
+        How often (in absorbed rows) the Voronoi lattice is REBUILT from the
+        retained reservoir instead of only being nudged online.
+
+        Before v3.12 the lattice was built once, from the warm-up window
+        (``max(4500, 12 * crystal_size)`` rows), and never rebuilt. A rare
+        regime that appeared later in the stream therefore reached the crystal
+        with zero dedicated cells: measured on a 60k-row synthetic stream, a
+        regime starting at 10% of the stream contributed 0 of ~15 expected
+        medoids, while the same regime at 0-5% contributed 83-106.
+
+        With the default ``lattice_rebuild_interval=0`` the lattice is rebuilt
+        once the stream has grown past the warm-up window, so the crystal
+        covers the whole stream instead of its first few thousand rows. The
+        rebuild is O(reservoir * M) in time and is amortised over the stream;
+        the retained reservoir stays bounded by ``max_init_buffer`` rows, so
+        memory remains O(k^2 + d + reservoir).
     """
 
     def __init__(
@@ -143,15 +160,29 @@ class SpectralHologramDistiller:
         use_residual: bool = True,
         critical_threshold: float | None = None,
         auto_band_ratio: bool = False,
+        lattice_rebuild_interval: int = 0,
     ):
         if tail not in ("high", "low", "both"):
             raise ValueError(f"tail must be 'high', 'low' or 'both', got {tail!r}")
         if on_nonfinite not in ("raise", "drop"):
             raise ValueError(f"on_nonfinite must be 'raise' or 'drop', got {on_nonfinite!r}")
+        # Lattice-geometry sanity: reject parameter sets that cannot produce a
+        # usable Voronoi lattice before any streaming state is allocated.
+        if int(crystal_size) < 1:
+            raise ValueError(f"crystal_size must be >= 1, got {crystal_size}")
+        if int(sketch_dim) < 2:
+            raise ValueError(f"sketch_dim must be >= 2, got {sketch_dim}")
+        if not 0.0 <= float(high_band_ratio) <= 1.0:
+            raise ValueError(
+                f"high_band_ratio must be within [0, 1], got {high_band_ratio}"
+            )
         self.on_nonfinite = on_nonfinite
         self.d_in = None  # fixed by the first non-empty batch
         self.M = crystal_size
         self.M_high = int(round(crystal_size * high_band_ratio))
+        # Raw ratio kept for artifact persistence: heal_domain_shift protects
+        # this fraction of the old crystal's phase-peak band when pruning.
+        self.high_band_ratio = float(high_band_ratio)
         self.M_low = crystal_size - self.M_high
         self.k = sketch_dim
         self.beta_low = beta_low
@@ -170,6 +201,11 @@ class SpectralHologramDistiller:
         self.use_residual = bool(use_residual)
         self.critical_threshold = None if critical_threshold is None else float(critical_threshold)
         self.auto_band_ratio = bool(auto_band_ratio)
+        self.lattice_rebuild_interval = int(lattice_rebuild_interval)
+        if self.lattice_rebuild_interval < 0:
+            raise ValueError(
+                f"lattice_rebuild_interval must be >= 0, got {lattice_rebuild_interval}"
+            )
         self.rng = np.random.default_rng(random_state)
 
         self.n_seen = 0
@@ -182,6 +218,13 @@ class SpectralHologramDistiller:
 
         self.init_Z, self.init_X, self.init_Y, self.init_U, self.init_score = [], [], [], [], []
         self.lattice_ready = False
+
+        # Reservoir of streamed rows used to REBUILD the lattice once the stream
+        # has grown past the warm-up window (see lattice_rebuild_interval).
+        # Bounded by max_init_buffer rows so memory stays O(k^2 + d + reservoir).
+        self.res_Z, self.res_X, self.res_Y, self.res_U, self.res_score = [], [], [], [], []
+        self._reservoir_rows = 0
+        self._rows_since_rebuild = 0
 
         self.centers_ZY = None
         self.med_X = None
@@ -242,6 +285,12 @@ class SpectralHologramDistiller:
         return Z, U / norms
 
     def _seed_kmeans_pp(self, ZY_cand: np.ndarray, n_select: int) -> np.ndarray:
+        n_select = int(n_select)
+        if n_select <= 0:
+            # Zero-budget band (e.g. high_band_ratio=0 or 1): seeding nothing
+            # here is the contract, otherwise one stray centre is returned and
+            # the lattice grows past the requested crystal_size.
+            return ZY_cand[:0].copy()
         n_total = len(ZY_cand)
         if n_total == 0:
             # Degenerate split (every row in the same trigger class): there is
@@ -351,6 +400,43 @@ class SpectralHologramDistiller:
         self.init_Z, self.init_X, self.init_Y, self.init_U, self.init_score = [], [], [], [], []
         self.lattice_ready = True
 
+    def _rebuild_lattice_from_reservoir(self):
+        """Re-seed the lattice from the retained reservoir.
+
+        The reservoir holds a bounded sample of the whole stream (not just the
+        warm-up window), so a rare regime that appeared late gets its own
+        Voronoi cells. The reservoir's phase scores are re-used as-is: they
+        were computed against the same trigger definition, so the percentile
+        split stays meaningful.
+        """
+        if not self.res_X:
+            return False
+        self.init_Z = [np.vstack(self.res_Z)]
+        self.init_X = [np.vstack(self.res_X)]
+        self.init_Y = [np.vstack(self.res_Y)]
+        self.init_U = [np.vstack(self.res_U)]
+        self.init_score = [np.concatenate(self.res_score)]
+        self._build_phase_manifold_lattice()
+        self._rows_since_rebuild = 0
+        return True
+
+    def _reservoir_add(self, Z_B, X_B, y_B, U_B, score_B):
+        """Append a batch to the bounded reservoir, evicting the oldest rows."""
+        cap = int(self.max_init_buffer)
+        self.res_Z.append(np.array(Z_B, dtype=np.float64, copy=True))
+        self.res_X.append(np.array(X_B, dtype=np.float64, copy=True))
+        self.res_Y.append(np.array(y_B, dtype=np.float64, copy=True))
+        self.res_U.append(np.array(U_B, dtype=np.float64, copy=True))
+        self.res_score.append(np.array(score_B, dtype=np.float64, copy=True))
+        self._reservoir_rows += len(X_B)
+        # Evict the oldest rows once the reservoir exceeds the cap. Dropping
+        # whole leading batches keeps the reservoir contiguous and cheap.
+        while self._reservoir_rows > cap and len(self.res_X) > 1:
+            first = self.res_X[0]
+            self._reservoir_rows -= len(first)
+            self.res_Z.pop(0); self.res_X.pop(0); self.res_Y.pop(0)
+            self.res_U.pop(0); self.res_score.pop(0)
+
     # --- public API -----------------------------------------------------------
 
     def partial_fit(self, X_batch: np.ndarray, y_batch: np.ndarray | None = None):
@@ -388,6 +474,11 @@ class SpectralHologramDistiller:
 
         if y_batch is not None:
             y_batch = np.asarray(y_batch, dtype=np.float64)
+            if y_batch.ndim == 2 and y_batch.shape[1] != 1:
+                raise ValueError(
+                    f"y_batch must be 1-D or (B, 1), got shape {y_batch.shape}; "
+                    "multi-target y is not supported"
+                )
             if y_batch.ndim == 2 and y_batch.shape[1] == 1:
                 y_batch = y_batch.reshape(-1, 1)
             if y_batch.ndim not in (1, 2):
@@ -505,11 +596,23 @@ class SpectralHologramDistiller:
         # warm-up the frozen first-batch statistics are kept, so buffered phase
         # scores remain comparable with the percentile cut at lattice build.
         if self.adaptive_y_stats and self.lattice_ready:
+            old_mean, old_std = self.y_mean, self.y_std
             y_flat = np.asarray(y_batch, dtype=np.float64).reshape(-1)
             lr_stat = min(0.10, len(y_flat) / max(self.n_seen, 1))
             self.y_mean = (1.0 - lr_stat) * self.y_mean + lr_stat * float(np.mean(y_flat))
             var_upd = (1.0 - lr_stat) * (self.y_std ** 2) + lr_stat * float(np.var(y_flat))
             self.y_std = float(np.sqrt(max(var_upd, 1e-12)))
+            # Rebase the stored centres' y-coordinate onto the *new* statistics.
+            # Without this the centres keep living in the old (y_mean, y_std)
+            # coordinate system while every incoming row is projected with the
+            # updated one, so assignments silently mix two different scales.
+            # c_new = kappa * (y - mean_new) / std_new with
+            # y = c_old * std_old / kappa + mean_old, applied to every centre.
+            if self.centers_ZY is not None and self.centers_ZY.shape[1] > 0:
+                if old_std > 0.0 and self.y_std > 0.0:
+                    ratio = old_std / self.y_std
+                    shift = self.kappa * (old_mean - self.y_mean) / self.y_std
+                    self.centers_ZY[:, -1] = self.centers_ZY[:, -1] * ratio + shift
 
         residual = np.sum((y_batch - U_B @ W_pred) ** 2, axis=1)
         res_ratio = residual / (np.median(residual) + 1e-8)
@@ -521,23 +624,71 @@ class SpectralHologramDistiller:
             y_z = np.maximum(0.0, -y_norm)
         else:  # "both"
             y_z = np.abs(y_norm)
-        phase_score = (res_ratio if self.use_residual else 0.0) + 2.0 * (y_z ** 2)
+        # np.atleast_1d: a single-row batch squeezes y_z to a 0-d array, which
+        # would later crash np.concatenate on the buffered phase scores.
+        phase_score = np.atleast_1d((res_ratio if self.use_residual else 0.0) + 2.0 * (y_z ** 2))
+
+        # Retain a bounded sample of every row for a later lattice rebuild.
+        # This is what lets a rare regime that appears LATE in the stream reach
+        # the crystal (see lattice_rebuild_interval).
+        if self.lattice_rebuild_interval > 0:
+            self._reservoir_add(Z_B, X_batch, y_batch, U_B, phase_score)
 
         if not self.lattice_ready:
-            self.init_Z.append(Z_B)
-            # Copy caller-owned buffers: the caller may reuse its streaming buffer
-            # in place after partial_fit() returns, and the crystal is not built
-            # until finalize_crystal().
-            self.init_X.append(np.array(X_batch, dtype=np.float64, copy=True))
-            self.init_Y.append(np.array(y_batch, dtype=np.float64, copy=True))
-            self.init_U.append(U_B)
-            self.init_score.append(phase_score)
-            target_buf = min(self.max_init_buffer, max(4500, self.M * 12))
-            if sum(len(a) for a in self.init_Z) >= target_buf:
+            buffered = int(sum(len(a) for a in self.init_Z))
+            cap = int(self.max_init_buffer)
+            target_buf = min(cap, max(4500, self.M * 12))
+            if buffered + B > cap:
+                # Hard cap: the warm-up buffer must never hold more than
+                # ``max_init_buffer`` rows. A single oversized batch is split
+                # instead of being buffered whole (which used to spike cdist
+                # memory at lattice-build time): the leading rows that still fit
+                # build the lattice and the remainder is streamed through the
+                # ordinary online-update path below, so no data is dropped and
+                # the accumulators keep counting every row.
+                take = max(cap - buffered, 0)
+                if take > 0:
+                    self.init_Z.append(Z_B[:take])
+                    # Copy caller-owned buffers: the caller may reuse its
+                    # streaming buffer in place after partial_fit() returns.
+                    self.init_X.append(np.array(X_batch[:take], dtype=np.float64, copy=True))
+                    self.init_Y.append(np.array(y_batch[:take], dtype=np.float64, copy=True))
+                    self.init_U.append(U_B[:take])
+                    self.init_score.append(phase_score[:take])
                 self._build_phase_manifold_lattice()
-            return
+                if take < B:
+                    # Stream the not-yet-buffered tail of the batch through the
+                    # online update (fall through instead of returning).
+                    X_batch = X_batch[take:]
+                    y_batch = y_batch[take:]
+                    Z_B = Z_B[take:]
+                    U_B = U_B[take:]
+                else:
+                    return self
+            else:
+                self.init_Z.append(Z_B)
+                # Copy caller-owned buffers: the caller may reuse its streaming buffer
+                # in place after partial_fit() returns, and the crystal is not built
+                # until finalize_crystal().
+                self.init_X.append(np.array(X_batch, dtype=np.float64, copy=True))
+                self.init_Y.append(np.array(y_batch, dtype=np.float64, copy=True))
+                self.init_U.append(U_B)
+                self.init_score.append(phase_score)
+                if buffered + B >= target_buf:
+                    self._build_phase_manifold_lattice()
+                return self
 
         # Online update of the phase-manifold lattice.
+        self._rows_since_rebuild += B
+        if (
+            self.lattice_rebuild_interval > 0
+            and self._rows_since_rebuild >= self.lattice_rebuild_interval
+        ):
+            # The stream has moved on since the lattice was seeded. Re-seed it
+            # from the reservoir so late-arriving regimes get their own cells.
+            # Only the medoids and their counts are replaced; the spectral
+            # accumulators (Psi_sum / Phi_sum) keep covering the whole stream.
+            self._rebuild_lattice_from_reservoir()
         ZY_B = self._make_phase_coords(Z_B, y_batch)
         dists = cdist(ZY_B, self.centers_ZY, metric="sqeuclidean")
         assign = np.argmin(dists, axis=1)
@@ -576,7 +727,10 @@ class SpectralHologramDistiller:
 
         order = np.argsort(self.counts)[::-1]
         self.crystal_X = self.med_X[order].copy()
-        self.crystal_Y = self.med_Y[order].squeeze().copy()
+        # reshape(-1), not squeeze(): a single-medoid lattice would otherwise
+        # squeeze crystal_Y to a 0-d scalar and breaks save/load, the peak slice
+        # and the heal path.
+        self.crystal_Y = self.med_Y[order].reshape(-1).copy()
         self.crystal_U = self.med_U[order].copy()
         sorted_counts = self.counts[order].copy()
         M_curr = len(self.crystal_U)
@@ -602,7 +756,12 @@ class SpectralHologramDistiller:
 
         gamma_prob = gamma / np.sum(gamma)
         Psi_crystal = (self.crystal_U.T * gamma_prob) @ self.crystal_U
-        rel_error = linalg.norm(Psi_crystal - Psi_hat, ord="fro") / linalg.norm(Psi_hat, ord="fro")
+        # Pure-herding intermediate (the FISTA solution before Voronoi tempering
+        # and blending). Exposed under an explicit name for diagnostics: it is
+        # NOT what save_hologram() exports.
+        self.herding_rel_error = (
+            linalg.norm(Psi_crystal - Psi_hat, ord="fro") / linalg.norm(Psi_hat, ord="fro")
+        )
 
         # Root tempering of the Voronoi measure (p ** voronoi_temper): keeps the
         # global RMSE balanced while preserving the amplitude of the phase-peak band.
@@ -610,6 +769,13 @@ class SpectralHologramDistiller:
         tempered_voronoi /= np.sum(tempered_voronoi)
         w_combined = (self.herding_mix * tempered_voronoi + (1.0 - self.herding_mix) * gamma_prob) * M_curr
         self.gamma_weights = w_combined / np.mean(w_combined)
+
+        # The returned error must describe the crystal that is actually written
+        # out: renormalise the exported (blended) ``gamma_weights`` back into a
+        # probability vector and measure that reconstruction.
+        exported_prob = self.gamma_weights / float(np.sum(self.gamma_weights))
+        Psi_exported = (self.crystal_U.T * exported_prob) @ self.crystal_U
+        rel_error = linalg.norm(Psi_exported - Psi_hat, ord="fro") / linalg.norm(Psi_hat, ord="fro")
         return rel_error
 
     def save_hologram(
@@ -630,20 +796,49 @@ class SpectralHologramDistiller:
         raw ``d``-feature delta stream from a plain ``d``-feature crystal. Without
         it a 1-feature window fed to a 2-feature non-delta crystal would be
         silently reinterpreted as a delta stream.
+
+        ``rank_passport`` must be in ``[1, sketch_dim]``. The OOD radar's alert
+        threshold is calibrated for the shipped rank of 32, so a different rank
+        changes the meaning of ``bw_distance``; the loader records the rank it
+        was given so the caller can tell the two apart.
         """
+        k = int(self.k)
+        rank = int(rank_passport)
+        if rank < 1:
+            raise ValueError(
+                f"rank_passport must be >= 1, got {rank_passport} "
+                f"(0 would silently select every eigenpair via eigvals[-0:])"
+            )
+        if rank > k:
+            # A rank above the sketch dimension cannot be represented; the
+            # passport simply keeps every available eigenpair. This is not an
+            # error, but it does change what bw_distance means, so the effective
+            # rank is recorded in the artifact.
+            rank = k
+        if self.crystal_X is None:
+            raise ValueError(
+                "save_hologram() called before finalize_crystal(); the crystal "
+                "has no medoids to write"
+            )
+        if self.gamma_weights is None:
+            raise ValueError(
+                "save_hologram() called before finalize_crystal(); the crystal "
+                "has no herding weights to write"
+            )
         Psi_hat = self.Psi_sum / self.n_seen
         eigvals, eigvecs = linalg.eigh(Psi_hat)
         payload = dict(
             crystal_X=self.crystal_X.astype(np.float32),
             crystal_Y=self.crystal_Y.astype(np.float32),
             gamma_weights=self.gamma_weights.astype(np.float32),
-            passport_eigvals=eigvals[-rank_passport:].astype(np.float16),
-            passport_eigvecs=eigvecs[:, -rank_passport:].astype(np.float16),
+            passport_eigvals=eigvals[-rank:].astype(np.float16),
+            passport_eigvecs=eigvecs[:, -rank:].astype(np.float16),
             X_mean=self.X_mean.astype(np.float32),
             X_std=self.X_std.astype(np.float32),
             n_seen=np.array([self.n_seen], dtype=np.int64),
             tail=np.array(self.tail),
             include_deltas=np.array(bool(self.include_deltas)),
+            high_band_ratio=np.array([float(self.high_band_ratio)], dtype=np.float64),
         )
         if include_projector:
             payload["Omega"] = self.Omega.astype(np.float32)
@@ -701,6 +896,15 @@ class HologramCrystalLoader:
                 "artifact declares include_deltas=True but X_mean has odd width "
                 f"({len(self.X_mean)}); the artifact is inconsistent"
             )
+
+        # Band split used at distillation time; heal_domain_shift protects this
+        # fraction of the crystal's phase-peak band when pruning under a cap.
+        # Legacy artifacts predate the field and fall back to the 0.26 default.
+        if "high_band_ratio" in data.files:
+            br = float(np.asarray(data["high_band_ratio"]).reshape(-1)[0])
+            self.high_band_ratio = br if 0.0 < br < 1.0 else 0.26
+        else:
+            self.high_band_ratio = 0.26
 
         self._prev_row = None  # last raw row of the previous streaming radar call
 
@@ -923,7 +1127,11 @@ class HologramCrystalLoader:
         eig_inner = np.maximum(linalg.eigvalsh(inner), 0.0)
 
         bw_dist = float(np.sqrt(max(0.0, np.trace(A_sub) + np.trace(B_sub) - 2.0 * np.sum(np.sqrt(eig_inner)))))
-        thr = self._calibrated_threshold(len(X_new_stream), adaptive_threshold=adaptive_threshold)
+        # Row count of the *normalised* window: len(X_new_stream) would count
+        # features of a 1-D single-row window (81 features -> batch of 81),
+        # which inflated the threshold and made the same point decide
+        # differently as (d,) vs (1, d).
+        thr = self._calibrated_threshold(len(U_new), adaptive_threshold=adaptive_threshold)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
@@ -984,8 +1192,24 @@ class HologramCrystalLoader:
         behavior.
         """
         t0 = time.perf_counter()
-        shift = self.check_domain_shift(X_new_stream, distiller_ref=distiller_ref)
+        X_win = np.asarray(X_new_stream, dtype=np.float64)
+        if X_win.ndim == 1:
+            X_win = X_win.reshape(1, -1)
+        if X_win.ndim != 2:
+            raise ValueError(f"stream window must be 2-D, got shape {X_win.shape}")
+        # Stateless pre-check on purpose: forwarding streaming=True here would
+        # advance _prev_row, and _prepare_stream below would then compute the
+        # first-difference dX[0] against the window's own last row.
+        shift = self.check_domain_shift(X_win, distiller_ref=distiller_ref)
         if not shift["is_shifted"] and not force:
+            # Keep the first-difference chain intact for delta crystals: a
+            # no-heal call must advance _prev_row exactly like a radar call
+            # with streaming=True would (raw-width windows only, mirroring
+            # _normalize_stream's rule for pre-augmented windows).
+            if streaming and self.include_deltas and len(X_win) > 0:
+                d_raw = len(self.X_mean) // 2
+                if X_win.shape[1] == d_raw:
+                    self._prev_row = X_win[-1].copy()
             return {
                 "healed": False,
                 "n_injected": 0,
@@ -996,24 +1220,39 @@ class HologramCrystalLoader:
             }
 
         rng = np.random.default_rng(random_state)
-        Z_new, U_new = self._prepare_stream(
-            X_new_stream, distiller_ref=distiller_ref, remember_prev_row=streaming
-        )
-        n_total = len(Z_new)
+
+        # Window row count computed BEFORE any projection: the cap contract must
+        # be checked before _prepare_stream advances the streaming continuity
+        # state, so a rejected heal leaves the loader completely untouched.
+        n_total = int(X_win.shape[0])
         n_sel = min(int(n_inject), n_total)
 
         # Validate an impossible memory cap before mutating the loader. The
         # phase-peak band and all injected medoids are protected, so the cap
-        # must be able to hold at least those (the exact count is re-checked
-        # after the protected set is built, where overlaps are known).
+        # must be able to hold at least those. The two protected index sets can
+        # overlap (a phase-peak medoid may also carry a high weight), so the
+        # requirement is the size of their UNION, not the sum of the two sizes:
+        # a peak-5 + top-weight-5 set that is the same 5 medoids needs 5 slots,
+        # not 10 (the exact count is re-checked after the protected set is
+        # built).
         if max_crystal_size is not None:
             cap_req = int(max_crystal_size)
             if cap_req < 1:
                 raise ValueError(f"max_crystal_size must be >= 1, got {max_crystal_size}")
             n_old_now = len(self.X)
-            n_protect_old = max(1, int(round(0.26 * n_old_now)))
+            protected_pre = np.zeros(n_old_now, dtype=bool)
+            n_protect_old = max(1, int(round(self.high_band_ratio * n_old_now)))
+            y_old_now = self.y[:n_old_now]
+            if self.tail == "high":
+                protected_pre[np.argsort(y_old_now)[-n_protect_old:]] = True
+            elif self.tail == "low":
+                protected_pre[np.argsort(y_old_now)[:n_protect_old]] = True
+            else:  # "both": most extreme relative to the old median
+                protected_pre[np.argsort(np.abs(y_old_now - np.median(y_old_now)))[-n_protect_old:]] = True
             n_protect_weight = int(round(float(protect_old_weight_frac) * n_old_now))
-            min_required = n_sel + n_protect_old + n_protect_weight
+            if n_protect_weight > 0:
+                protected_pre[np.argsort(self.weights[:n_old_now])[-n_protect_weight:]] = True
+            min_required = n_sel + int(protected_pre.sum())
             if cap_req < min_required:
                 raise ValueError(
                     f"max_crystal_size={cap_req} cannot accommodate {n_sel} injected "
@@ -1021,13 +1260,26 @@ class HologramCrystalLoader:
                     f"use max_crystal_size >= {min_required} or reduce n_inject"
                 )
 
+        Z_new, U_new = self._prepare_stream(
+            X_win, distiller_ref=distiller_ref, remember_prev_row=streaming
+        )
+
         # k-means++ seeding in Z-space
         first_idx = int(rng.integers(0, n_total))
         selected = [first_idx]
         min_sq = np.sum((Z_new - Z_new[first_idx]) ** 2, axis=1)
         for _ in range(1, n_sel):
-            probs = min_sq / (np.sum(min_sq) + 1e-12)
-            nxt = int(rng.choice(n_total, p=probs))
+            total_sq = float(np.sum(min_sq))
+            if total_sq <= 0.0 or not np.isfinite(total_sq):
+                # Degenerate window (all rows identical, e.g. a frozen sensor):
+                # every point is equally close to the current centers, so the
+                # D^2 seeding distribution is all zeros and rng.choice would
+                # reject probabilities that do not sum to 1. Fall back to
+                # uniform selection, matching _seed_kmeans_pp's degenerate path.
+                nxt = int(rng.integers(0, n_total))
+            else:
+                probs = min_sq / (total_sq + 1e-12)
+                nxt = int(rng.choice(n_total, p=probs))
             selected.append(nxt)
             min_sq = np.minimum(min_sq, np.sum((Z_new - Z_new[nxt]) ** 2, axis=1))
         centers = Z_new[selected].copy()
@@ -1046,9 +1298,28 @@ class HologramCrystalLoader:
         counts = np.bincount(labels, minlength=n_sel).astype(np.float64) + 1.0
         w_patch = (counts / np.mean(counts)) * float(new_weight_boost)
 
-        X_patch = X_new_stream[med_idx].astype(np.float64).copy()
+        X_patch = X_win[med_idx].copy()
+        if X_patch.shape[1] != self.X.shape[1]:
+            raise ValueError(
+                f"heal patch has {X_patch.shape[1]} features but the crystal stores "
+                f"{self.X.shape[1]}; pass raw feature windows to heal (pre-augmented "
+                "[x || dx] windows are radar-only)"
+            )
         if y_new_stream is not None:
-            y_patch = np.asarray(y_new_stream, dtype=np.float64).squeeze()[med_idx].copy()
+            y_arr = np.asarray(y_new_stream, dtype=np.float64).reshape(-1)
+            if len(y_arr) != n_total:
+                raise ValueError(
+                    f"y_new_stream has {len(y_arr)} labels for {n_total} window rows"
+                )
+            if not np.isfinite(y_arr).all():
+                raise ValueError(
+                    "y_new_stream contains NaN/Inf; heal refuses to poison the "
+                    "crystal with non-finite targets (the distiller enforces the "
+                    "same policy on y via on_nonfinite)"
+                )
+            # reshape(-1), not squeeze: a single-row window's (1,) y would
+            # squeeze to a 0-d array and 0-d[med_idx] raises IndexError.
+            y_patch = y_arr[med_idx].copy()
         else:
             # Unsupervised fallback: spectral novelty score against current passport
             proj = U_new[med_idx] @ self.eigvecs
@@ -1069,7 +1340,8 @@ class HologramCrystalLoader:
             if excess > 0:
                 # Protect the phase-peak band among old medoids + all new
                 # medoids; the band direction follows the crystal's tail mode
-                n_protect_old = max(1, int(round(0.26 * n_old)))
+                # and its size follows the persisted high_band_ratio.
+                n_protect_old = max(1, int(round(self.high_band_ratio * n_old)))
                 y_old = self.y[:n_old]
                 if self.tail == "high":
                     peak_old_idx = np.argsort(y_old)[-n_protect_old:]
@@ -1129,9 +1401,9 @@ class HologramCrystalLoader:
         self.eigvals = eigvals[-rank_p:].astype(np.float64)
         self.eigvecs = eigvecs[:, -rank_p:].astype(np.float64)
         self.Psi_passport = (self.eigvecs * self.eigvals) @ self.eigvecs.T
-        self.n_seen += len(X_new_stream)
+        self.n_seen += n_total
 
-        after = self.check_domain_shift(X_new_stream, distiller_ref=distiller_ref)
+        after = self.check_domain_shift(X_win, distiller_ref=distiller_ref)
         return {
             "healed": True,
             "n_injected": int(n_sel),
@@ -1158,6 +1430,7 @@ class HologramCrystalLoader:
             n_seen=np.array([self.n_seen], dtype=np.int64),
             tail=np.array(self.tail),
             include_deltas=np.array(bool(self.include_deltas)),
+            high_band_ratio=np.array([float(self.high_band_ratio)], dtype=np.float64),
         )
         if self.Omega is not None and self.phase is not None:
             payload["Omega"] = self.Omega.astype(np.float32)

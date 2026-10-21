@@ -253,6 +253,13 @@ def run_dataset(key, seeds, m, batch, model_seed, include_kt=True, checkpoint_pa
     rbf_gamma = 1.0 / (d_feat * 1.1)
 
     # Oracle: seed-independent, fit once.
+    # NOTE: the KRR oracle uses the first `n_oracle` rows in split order. Both
+    # datasets routed through run_dataset() are split with shuffle=True, so this
+    # is an unbiased random subsample and reproduces the published oracle table.
+    # Do NOT switch to a fresh random draw without also regenerating the
+    # committed `bench_seeds_results.json` and the README oracle rows.
+    # For a TIME-ORDERED stream this slice would train on the earliest period
+    # only -- pass an explicit subsample instead of reusing run_dataset().
     oracle = {"krr": None, "gbm": None}
     n_oracle = min(9000, len(X_tr))
     krr = KernelRidge(kernel="rbf", alpha=0.08, gamma=rbf_gamma)
@@ -342,6 +349,12 @@ def run_dataset(key, seeds, m, batch, model_seed, include_kt=True, checkpoint_pa
         "dataset": key,
         "title": title,
         "crystal_size": m,
+        # Provenance: `batch` changes how partial_fit chunks the stream, which
+        # changes the crystal, so it must be recorded with the records rather
+        # than inferred. `model_seed` lives here too because results merged from
+        # runs with different model seeds would otherwise be indistinguishable.
+        "batch": int(batch),
+        "model_seed": int(model_seed),
         "n_seeds": len(seeds),
         "seeds": list(seeds),
         "split_random_state": 42,

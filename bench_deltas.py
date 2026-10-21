@@ -18,6 +18,8 @@ Results -> bench_deltas_results.json (single source of truth).
 
 Usage:
     python bench_deltas.py [--seeds 20]
+Writes bench_deltas_v2_results.json (default). The historical
+bench_deltas_results.json is never overwritten by default.
 """
 
 from __future__ import annotations
@@ -128,6 +130,7 @@ def main():
     ap.add_argument("--seeds", type=int, default=20)
     ap.add_argument("--crystal-size", type=int, default=200)
     ap.add_argument("--batch", type=int, default=800)
+    ap.add_argument("--output", default="bench_deltas_v2_results.json")
     ap.add_argument("--n-train", type=int, default=6400)
     ap.add_argument("--n-test", type=int, default=2600)
     ap.add_argument("--model-seed", type=int, default=123)
@@ -221,10 +224,10 @@ def main():
         "wilcoxon_deltas_on_vs_off": wilcoxon_tests,
         "records": records,
     }
-    with open("bench_deltas_results.json", "w", encoding="utf-8") as f:
+    with open(args.output, "w", encoding="utf-8") as f:
         json.dump(out, f, indent=2)
 
-    print(f"\nSaved -> bench_deltas_results.json ({out['summary']['elapsed_sec']:.1f}s)")
+    print(f"\nSaved -> {args.output} ({out['summary']['elapsed_sec']:.1f}s)")
     print(f"  burst capture (med): off={summary['off_burst_captured_median']:.1f} "
           f"on={summary['on_burst_captured_median']:.1f} random={summary['random_burst_captured_median']:.1f} "
           f"(of {int(burst_tr.sum())} burst rows)")

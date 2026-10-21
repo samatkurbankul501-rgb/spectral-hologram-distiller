@@ -1,0 +1,76 @@
+{
+ "dataset": "edge_envelope",
+ "title": "On-device cost on one CPU core",
+ "m": 300,
+ "python": "3.11.15",
+ "platform": "Windows-10-10.0.26200-SP0",
+ "thread_env": 1,
+ "repeats": 3,
+ "cases": [
+  {
+   "case": "sensor-4d",
+   "n_features": 4,
+   "n_train_rows": 16000,
+   "crystal_points": 300,
+   "artifact_kb": 28.677734375,
+   "rss_base_mb": 58.4296875,
+   "rss_after_fit_mb": 60.421875,
+   "rss_after_load_mb": 60.703125,
+   "rss_delta_load_mb": 0.28125,
+   "crystal_load_ms": 3.4708000002865447,
+   "radar_ms": {
+    "64": 1.2311500004216214,
+    "256": 3.6496000002443907,
+    "1024": 18.561749999207677
+   },
+   "partial_fit_rows_per_s": 27141.005496205576,
+   "radar_ms_spread": {
+    "64": [
+     1.0673499991753488,
+     2.067949999400298
+    ],
+    "256": [
+     3.0169999990903307,
+     6.130750000920671
+    ],
+    "1024": [
+     15.457849999620521,
+     20.32584999960818
+    ]
+   }
+  },
+  {
+   "case": "superconduct-81d",
+   "n_features": 81,
+   "n_train_rows": 17010,
+   "crystal_points": 300,
+   "artifact_kb": 184.6748046875,
+   "rss_base_mb": 68.98046875,
+   "rss_after_fit_mb": 71.26171875,
+   "rss_after_load_mb": 72.45703125,
+   "rss_delta_load_mb": 1.25390625,
+   "crystal_load_ms": 5.850600000485429,
+   "radar_ms": {
+    "64": 1.2554500008263858,
+    "256": 4.932300000291434,
+    "1024": 17.933549999725074
+   },
+   "partial_fit_rows_per_s": 9979.51061559346,
+   "radar_ms_spread": {
+    "64": [
+     1.1950999996770406,
+     1.259800000298128
+    ],
+    "256": [
+     4.7101499994823826,
+     6.1635000001842855
+    ],
+    "1024": [
+     16.67974999963917,
+     22.67870000014227
+    ]
+   }
+  }
+ ],
+ "elapsed_sec": 10.8
+}

@@ -1,0 +1,242 @@
+{
+ "dataset": "metropt3_watch",
+ "title": "Early warning on a real metro APU",
+ "protocol": {
+  "learn": [
+   "2020-02-01",
+   "2020-03-15"
+  ],
+  "calibrate": [
+   "2020-03-15",
+   "2020-04-10"
+  ],
+  "watch": [
+   "2020-04-10",
+   "2020-08-01"
+  ],
+  "window_min": 60,
+  "step_min": 30,
+  "cooldown_h": 6.0,
+  "fa_budget_per_month": 1.0,
+  "ewma_halflife_days": 7.0,
+  "max_lead_days": 21,
+  "features": [
+   "TP2",
+   "TP3",
+   "H1",
+   "DV_pressure",
+   "Reservoirs",
+   "Oil_temperature",
+   "Motor_current",
+   "COMP",
+   "DV_eletric",
+   "Towers",
+   "MPG",
+   "LPS",
+   "Pressure_switch",
+   "Oil_level",
+   "Caudal_impulses",
+   "TP2_std",
+   "TP3_std",
+   "H1_std",
+   "DV_pressure_std",
+   "Reservoirs_std",
+   "Oil_temperature_std",
+   "Motor_current_std"
+  ]
+ },
+ "n_minutes": 252720,
+ "arms": [
+  {
+   "arm": "shd_detrend",
+   "detrended": true,
+   "tau": 0.5783434729713947,
+   "calibration_episodes": 1,
+   "watch_episodes": 0,
+   "unmatched_episodes": 0,
+   "unmatched_fa_per_month": 0.0,
+   "incidents": [
+    {
+     "name": "Air leak #1",
+     "start": "2020-04-18 00:00",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    },
+    {
+     "name": "Air leak #2",
+     "start": "2020-05-29 23:30",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    },
+    {
+     "name": "Air leak #3",
+     "start": "2020-06-05 10:00",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    },
+    {
+     "name": "Air leak #4",
+     "start": "2020-07-15 14:30",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    }
+   ],
+   "learn_sec": 3.4,
+   "crystal_kb": 54.6,
+   "watch_scan_sec": 0.0
+  },
+  {
+   "arm": "z_detrend",
+   "detrended": true,
+   "tau": 6.711676731888515,
+   "calibration_episodes": 1,
+   "watch_episodes": 27,
+   "unmatched_episodes": 12,
+   "unmatched_fa_per_month": 3.186,
+   "incidents": [
+    {
+     "name": "Air leak #1",
+     "start": "2020-04-18 00:00",
+     "first_alert": "2020-04-12T12:24",
+     "lead_hours": 131.6,
+     "detected": true
+    },
+    {
+     "name": "Air leak #2",
+     "start": "2020-05-29 23:30",
+     "first_alert": "2020-05-13T14:13",
+     "lead_hours": 393.28333333333336,
+     "detected": true
+    },
+    {
+     "name": "Air leak #3",
+     "start": "2020-06-05 10:00",
+     "first_alert": "2020-05-19T02:34",
+     "lead_hours": 415.43333333333334,
+     "detected": true
+    },
+    {
+     "name": "Air leak #4",
+     "start": "2020-07-15 14:30",
+     "first_alert": "2020-07-08T18:21",
+     "lead_hours": 164.15,
+     "detected": true
+    }
+   ]
+  },
+  {
+   "arm": "iforest_detrend",
+   "detrended": true,
+   "tau": 0.23562263345065543,
+   "calibration_episodes": 1,
+   "watch_episodes": 1,
+   "unmatched_episodes": 0,
+   "unmatched_fa_per_month": 0.0,
+   "incidents": [
+    {
+     "name": "Air leak #1",
+     "start": "2020-04-18 00:00",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    },
+    {
+     "name": "Air leak #2",
+     "start": "2020-05-29 23:30",
+     "first_alert": "2020-05-13T15:13",
+     "lead_hours": 392.28333333333336,
+     "detected": true
+    },
+    {
+     "name": "Air leak #3",
+     "start": "2020-06-05 10:00",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    },
+    {
+     "name": "Air leak #4",
+     "start": "2020-07-15 14:30",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    }
+   ],
+   "fit_sec": 0.4
+  },
+  {
+   "arm": "shd_raw",
+   "detrended": false,
+   "tau": 1.1408748674492613,
+   "calibration_episodes": 1,
+   "watch_episodes": 0,
+   "unmatched_episodes": 0,
+   "unmatched_fa_per_month": 0.0,
+   "incidents": [
+    {
+     "name": "Air leak #1",
+     "start": "2020-04-18 00:00",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    },
+    {
+     "name": "Air leak #2",
+     "start": "2020-05-29 23:30",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    },
+    {
+     "name": "Air leak #3",
+     "start": "2020-06-05 10:00",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    },
+    {
+     "name": "Air leak #4",
+     "start": "2020-07-15 14:30",
+     "first_alert": null,
+     "lead_hours": null,
+     "detected": false
+    }
+   ]
+  }
+ ],
+ "incidents_truth": [
+  {
+   "name": "Air leak #1",
+   "start": "2020-04-18 00:00",
+   "end": "2020-04-18 23:59",
+   "maintenance": "2020-04-30 12:00",
+   "severity": "High stress"
+  },
+  {
+   "name": "Air leak #2",
+   "start": "2020-05-29 23:30",
+   "end": "2020-05-30 06:00",
+   "maintenance": null,
+   "severity": "High stress"
+  },
+  {
+   "name": "Air leak #3",
+   "start": "2020-06-05 10:00",
+   "end": "2020-06-07 14:30",
+   "maintenance": "2020-06-08 16:00",
+   "severity": "High stress"
+  },
+  {
+   "name": "Air leak #4",
+   "start": "2020-07-15 14:30",
+   "end": "2020-07-15 19:00",
+   "maintenance": "2020-07-16 00:00",
+   "severity": "High stress"
+  }
+ ],
+ "elapsed_sec": 111.3
+}

@@ -1,0 +1,60 @@
+{
+ "dataset": "UCI Superconductivity",
+ "crystal_size": 200,
+ "repeats": 5,
+ "heldout_rows_available": 2808,
+ "windows_requested": [
+  64,
+  256,
+  1024
+ ],
+ "measured_windows": [
+  64,
+  256,
+  1024,
+  2808
+ ],
+ "records": {
+  "64": {
+   "label": "64",
+   "requested": 64,
+   "actual_rows": 64,
+   "median_ms": 2.2098999997979263,
+   "min_ms": 2.1777000001748092,
+   "max_ms": 2.3634999997739214,
+   "n": 5
+  },
+  "256": {
+   "label": "256",
+   "requested": 256,
+   "actual_rows": 256,
+   "median_ms": 8.37489999958052,
+   "min_ms": 6.525499999952444,
+   "max_ms": 8.704399999260204,
+   "n": 5
+  },
+  "1024": {
+   "label": "1024",
+   "requested": 1024,
+   "actual_rows": 1024,
+   "median_ms": 20.110200000090117,
+   "min_ms": 19.63439999963157,
+   "max_ms": 22.856900000078895,
+   "n": 5
+  },
+  "full": {
+   "label": "full",
+   "requested": null,
+   "actual_rows": 2808,
+   "median_ms": 62.35130000004574,
+   "min_ms": 62.23789999967266,
+   "max_ms": 70.24069999988569,
+   "n": 5
+  }
+ },
+ "skipped_windows": [],
+ "range_ms": [
+  2.2098999997979263,
+  62.35130000004574
+ ]
+}

@@ -92,7 +92,7 @@ def _fit_crystal(X, y, tail, crystal_size=80, seed=3):
 
 
 def test_version():
-    assert __version__ == "3.10.0"
+    assert __version__ == "3.11.0"
 
 
 def test_distiller_shapes(distilled):
@@ -515,7 +515,28 @@ def test_golden_crystal_numbers():
     assert d.crystal_X.shape == (120, 4)
     assert abs(float(np.median(d.crystal_Y)) - 0.274023952995281) < 1e-7
     assert abs(float(np.median(d.gamma_weights)) - 0.944936234133797) < 1e-7
-    assert abs(float(rel_err) - 0.08607388641467272) < 1e-7
+
+    # finalize_crystal() must return the error of the *exported* artifact, i.e.
+    # the blended + mean-normalised gamma_weights that save_hologram writes --
+    # not the intermediate pure-herding solution. The reference below is
+    # recomputed independently from the exported weights, so the assertion stays
+    # honest if the blend formula ever changes.
+    _psi_hat = d.Psi_sum / d.n_seen
+    _p_exported = d.gamma_weights / float(np.sum(d.gamma_weights))
+    _psi_exported = (d.crystal_U.T * _p_exported) @ d.crystal_U
+    _ref_error = (
+        np.linalg.norm(_psi_exported - _psi_hat, ord="fro")
+        / np.linalg.norm(_psi_hat, ord="fro")
+    )
+    assert abs(float(rel_err) - float(_ref_error)) < 1e-12
+    # Measured golden value for the *exported* blend (recomputed after this fix;
+    # the old 0.08607388641467272 described the pure-herding intermediate).
+    assert abs(float(rel_err) - 0.10113596434793093) < 1e-7
+    # The pure-herding intermediate is still available, under an explicit name.
+    assert hasattr(d, "herding_rel_error")
+    assert abs(float(d.herding_rel_error) - 0.08607388641467272) < 1e-7
+    # Tempering/blending deliberately trades spectral fit for cell-mass fidelity.
+    assert rel_err > d.herding_rel_error
 
     path = os.path.join(tempfile.mkdtemp(prefix="shd_golden_"), "golden.npz")
     d.save_hologram(path)
@@ -976,3 +997,263 @@ def test_delta_width_ambiguity_is_rejected():
     assert HologramCrystalLoader(path_d2).include_deltas is True
 
 
+
+
+def test_crystal_size_scaling_and_wide_band():
+    """Regression guard for the M / high_band_ratio settings the benchmark sweep
+    explores but no other test exercises.
+
+    The published benchmark uses crystal_size=300 with high_band_ratio=0.26, and
+    the equal-budget sweep (see README) evaluates 600 and wider bands. A
+    regression that breaks lattice growth at larger M, or that silently clamps
+    or ignores a wide band, would otherwise pass the suite unnoticed.
+    """
+    rng = np.random.default_rng(23)
+    n = 4000
+    X = rng.normal(size=(n, 4))
+    y = np.sin(2 * X[:, 0]) + 0.5 * X[:, 1] * X[:, 2] + 0.1 * rng.normal(size=n)
+    hot = np.abs(X[:, 0]) > 1.8
+    y[hot] += 6.0
+
+    def fit(size, band):
+        d = SpectralHologramDistiller(
+            crystal_size=size, high_band_ratio=band, sketch_dim=64, random_state=5
+        )
+        for i in range(0, n, 1000):
+            d.partial_fit(X[i : i + 1000], y[i : i + 1000])
+        d.finalize_crystal()
+        return d
+
+    crystals = {}
+    for size, band in ((300, 0.26), (600, 0.26), (300, 0.65), (600, 0.65)):
+        d = fit(size, band)
+        crystals[(size, band)] = d
+        M = len(d.crystal_Y)
+        # The lattice fills to the requested budget (a few cells may be empty).
+        assert 0.95 * size <= M <= size, f"crystal_size={size}: got {M} medoids"
+        assert d.crystal_X.shape[0] == M and d.crystal_X.shape[1] == 4
+        w = np.asarray(d.gamma_weights, dtype=np.float64).ravel()
+        assert w.shape == (M,), f"weights shape {w.shape} != ({M},)"
+        assert np.all(np.isfinite(w)) and np.all(w > 0), "non-finite or non-positive weight"
+        # gamma_weights follow the sklearn sample_weight convention used by the
+        # KMeans baseline too: counts/mean(counts) -> mean 1, i.e. sum == M.
+        assert abs(w.mean() - 1.0) < 1e-6, f"weights mean {w.mean()} != 1"
+        assert np.all(np.isfinite(d.crystal_X)) and np.all(np.isfinite(d.crystal_Y))
+
+    # A larger budget must buy more rare-regime cells; a wider band must too.
+    def rare(key):
+        d = crystals[key]
+        return int(np.sum(np.asarray(d.crystal_Y).ravel() >= 6.0))
+
+    assert rare((600, 0.26)) > rare((300, 0.26)), "doubling M did not add rare cells"
+    assert rare((300, 0.65)) > rare((300, 0.26)), "wide band did not add rare cells"
+    assert rare((600, 0.65)) > rare((600, 0.26)), "wide band did not add rare cells at M=600"
+
+
+# ---------------------------------------------------------------- v3.11 fixes
+# Regression tests for the defect-hunt fixes (see AUDIT history): heal
+# robustness, y-contract enforcement, high_band_ratio persistence, and
+# width-safe bank routing.
+
+def test_heal_constant_window_survives(distilled):
+    """Regression: a frozen-sensor (all-identical rows) window used to crash
+    heal with "Probabilities do not sum to 1" -- the inline k-means++ D^2
+    distribution degenerates to all zeros; it now falls back to uniform
+    selection like the distiller's own _seed_kmeans_pp degenerate path."""
+    _, path, _, _ = distilled
+    loader = HologramCrystalLoader(path)
+    n0 = len(loader.X)
+    stuck = np.full((120, 4), 10.0)
+    res = loader.heal_domain_shift(stuck, force=True, n_inject=10, random_state=0)
+    assert res["healed"] is True and res["n_injected"] == 10
+    assert len(loader.X) == n0 + 10
+    assert np.all(np.isfinite(loader.y))
+
+
+def test_heal_single_row_window_with_y(distilled):
+    """Regression: healing a single-row window with y used to raise
+    IndexError -- y.squeeze() turned a (1,) label array into a 0-d scalar,
+    which cannot be indexed with an array."""
+    _, path, _, _ = distilled
+    loader = HologramCrystalLoader(path)
+    n0 = len(loader.X)
+    X1 = np.asarray([[3.0, -1.0, 0.5, 2.0]]) + 20.0
+    res = loader.heal_domain_shift(X1, np.array([1.5]), force=True, random_state=0)
+    assert res["healed"] is True and res["n_injected"] == 1
+    assert len(loader.X) == n0 + 1
+    assert loader.y[-1] == 1.5
+
+
+def test_heal_rejects_nan_and_mismatched_y(distilled):
+    """Regression: heal used to accept NaN labels and silently poison
+    crystal_Y (the distiller's finite-mask policy was not mirrored); a
+    wrong-length y used to die in a cryptic broadcast instead of a contract
+    error."""
+    _, path, _, _ = distilled
+    loader = HologramCrystalLoader(path)
+    rng = np.random.default_rng(2)
+    Xw = rng.normal(size=(60, 4)) + 4.0
+    y_bad = rng.normal(size=60)
+    y_bad[7] = np.nan
+    try:
+        loader.heal_domain_shift(Xw, y_bad, force=True, random_state=0)
+    except ValueError as e:
+        assert "NaN/Inf" in str(e)
+    else:
+        raise AssertionError("heal accepted NaN in y_new_stream")
+
+    y_short = rng.normal(size=10)
+    try:
+        loader.heal_domain_shift(Xw, y_short, force=True, random_state=0)
+    except ValueError as e:
+        assert "labels for" in str(e)
+    else:
+        raise AssertionError("heal accepted a wrong-length y_new_stream")
+
+
+def test_multi_target_y_is_rejected():
+    """Regression: a (B, 2) y slipped past validation (the ndim==2 branch was
+    a no-op) and died later in a cryptic broadcast error; it must be a clean
+    contract rejection up front."""
+    rng = np.random.default_rng(3)
+    X = rng.normal(size=(100, 4))
+    y2 = rng.normal(size=(100, 2))
+    d = SpectralHologramDistiller(crystal_size=20, sketch_dim=16, random_state=0)
+    try:
+        d.partial_fit(X, y2)
+    except ValueError as e:
+        assert "multi-target" in str(e)
+    else:
+        raise AssertionError("(B, 2) y was silently accepted")
+
+
+def test_label_free_single_row_batches():
+    """Regression: with use_residual=False a single-row batch produced a 0-d
+    phase score, and np.concatenate of the buffered scores later crashed the
+    lattice build ("zero-dimensional arrays cannot be concatenated")."""
+    rng = np.random.default_rng(4)
+    d = SpectralHologramDistiller(
+        crystal_size=20, sketch_dim=16, random_state=0,
+        use_residual=False, max_init_buffer=40,
+    )
+    for _ in range(45):
+        d.partial_fit(rng.normal(size=(1, 4)))
+    d.finalize_crystal()
+    assert d.crystal_X.shape[0] == 20
+    assert np.all(np.isfinite(d.crystal_Y))
+
+
+def test_high_band_ratio_persisted_and_heal_protects_band():
+    """Regression: high_band_ratio was never written to the artifact, so
+    heal's cap pruning protected a hardcoded 26% band even for crystals built
+    with the 0.65 critical-first preset. The field is now persisted, heal
+    uses it, and legacy artifacts fall back to 0.26."""
+    tmpdir = tempfile.mkdtemp(prefix="shd_br_")
+
+    rng = np.random.default_rng(6)
+    n = 4000
+    X = rng.normal(size=(n, 4))
+    y = np.sin(2 * X[:, 0]) + 0.1 * rng.normal(size=n)
+    hot = np.abs(X[:, 0]) > 1.8
+    y[hot] += 6.0
+    d = SpectralHologramDistiller(
+        crystal_size=80, high_band_ratio=0.65, sketch_dim=64, random_state=0
+    )
+    for i in range(0, n, 1000):
+        d.partial_fit(X[i:i + 1000], y[i:i + 1000])
+    d.finalize_crystal()
+    path = os.path.join(tmpdir, "br65.hologram.npz")
+    d.save_hologram(path)
+
+    loader = HologramCrystalLoader(path)
+    assert loader.high_band_ratio == 0.65
+
+    # Legacy artifact without the field falls back to the 0.26 default.
+    z = dict(np.load(path, allow_pickle=False))
+    z.pop("high_band_ratio")
+    legacy = os.path.join(tmpdir, "legacy.hologram.npz")
+    np.savez_compressed(legacy, **z)
+    assert HologramCrystalLoader(legacy).high_band_ratio == 0.26
+
+    # Heal under a cap that forces pruning: the top-65% band must survive.
+    n_old = len(loader.X)
+    band_idx = np.argsort(loader.y)[-max(1, int(round(0.65 * n_old))):]
+    band_rows = {tuple(r) for r in loader.X[band_idx]}
+    X_new = rng.normal(size=(200, 4)) + 4.0
+    y_new = rng.normal(size=200) + 5.0
+    res = loader.heal_domain_shift(X_new, y_new, n_inject=30,
+                                   max_crystal_size=100, random_state=1,
+                                   force=True)
+    assert res["healed"] is True and res["n_pruned"] > 0
+    assert len(loader.X) == 100
+    kept = {tuple(r) for r in loader.X}
+    missing = band_rows - kept
+    assert not missing, f"{len(missing)} protected high-band medoids were pruned"
+
+
+def test_bank_skips_incompatible_width_crystals():
+    """Regression: one incompatible crystal (different feature width) used to
+    abort routing for the whole bank; routing now ranks only width-compatible
+    crystals, reports skipped ones as None, and raises a contract error only
+    when NO crystal can score the window."""
+    tmpdir = tempfile.mkdtemp(prefix="shd_bank_")
+
+    X, y = make_stream()
+    d4 = _fit_crystal(X, y, "high", crystal_size=40, seed=3)
+    p4 = os.path.join(tmpdir, "d4.hologram.npz")
+    d4.save_hologram(p4)
+
+    rng = np.random.default_rng(7)
+    X6 = rng.normal(size=(800, 6))
+    y6 = np.sin(X6[:, 0]) + 0.1 * rng.normal(size=800)
+    d6 = _fit_crystal(X6, y6, "high", crystal_size=40, seed=4)
+    p6 = os.path.join(tmpdir, "d6.hologram.npz")
+    d6.save_hologram(p6)
+
+    bank = DomainBank([p4, p6])
+    rep = bank.check_domain_shift(X[:50])
+    assert rep["bw_distances"][1] is None  # 6-feature crystal skipped, not fatal
+    assert rep["bw_distances"][0] is not None
+    sel = bank.select(X[:50])
+    assert sel.X.shape[1] == 4
+
+    try:
+        bank.check_domain_shift(rng.normal(size=(50, 5)))
+    except ValueError as e:
+        assert "no crystal in the bank" in str(e)
+    else:
+        raise AssertionError("bank routed a width no crystal can score")
+
+
+def test_heal_rejects_pre_augmented_delta_window():
+    """Regression: heal stored rows from whatever window it was given, so a
+    pre-augmented [x || dx] window on a delta crystal used to crash with a
+    cryptic vstack width error; it is now a clean contract error (the radar
+    still accepts pre-augmented windows)."""
+    tmpdir = tempfile.mkdtemp(prefix="shd_aug_")
+
+    rng = np.random.default_rng(8)
+    X = rng.normal(size=(600, 4))
+    y = X[:, 0]
+    d = SpectralHologramDistiller(
+        crystal_size=20, sketch_dim=16, random_state=0,
+        include_deltas=True, max_init_buffer=200,
+    )
+    for i in range(0, len(X), 200):
+        d.partial_fit(X[i:i + 200], y[i:i + 200])
+    d.finalize_crystal()
+    path = os.path.join(tmpdir, "delta.hologram.npz")
+    d.save_hologram(path)
+
+    loader = HologramCrystalLoader(path)
+    Xw = rng.normal(size=(40, 4)) + 3.0
+    dX = np.zeros_like(Xw)
+    dX[1:] = Xw[1:] - Xw[:-1]
+    X_aug = np.hstack([Xw, dX])
+    loader.check_domain_shift(X_aug)  # radar accepts pre-augmented windows
+    try:
+        loader.heal_domain_shift(X_aug, force=True, random_state=0)
+    except ValueError as e:
+        assert "radar-only" in str(e)
+    else:
+        raise AssertionError("heal accepted a pre-augmented window")

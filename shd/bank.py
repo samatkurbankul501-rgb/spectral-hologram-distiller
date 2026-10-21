@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 
+import numpy as np
+
 from .distiller import HologramCrystalLoader
 
 
@@ -53,23 +55,53 @@ class DomainBank:
     def __getitem__(self, index: int) -> HologramCrystalLoader:
         return self.loaders[index]
 
-    def check_domain_shift(self, X_new_stream) -> dict:
+    def check_domain_shift(self, X_new_stream, streaming: bool = False) -> dict:
         """Return the nearest-passport radar result.
 
         The returned ``is_shifted`` is True only when the *closest* domain is
         above its own threshold, i.e. the window matches no known regime.
         ``domain_index`` is the selected crystal; ``bw_distances`` exposes the
-        full bank for diagnostics.
+        full bank for diagnostics (``None`` for crystals whose feature width is
+        incompatible with the window).
+
+        Crystals whose expected feature width does not match the window are
+        excluded from the ranking instead of aborting the whole bank: a mixed
+        bank (e.g. a delta crystal stored next to plain ones) still routes any
+        window that at least one crystal can score.
         """
         if not self.loaders:
             raise ValueError("DomainBank is empty; add at least one crystal")
-        reports = [loader.check_domain_shift(X_new_stream) for loader in self.loaders]
-        best = min(range(len(reports)), key=lambda i: reports[i]["bw_distance"])
+        X = np.asarray(X_new_stream, dtype=np.float64)
+        if X.ndim == 1:
+            w = int(X.shape[0])
+        elif X.ndim == 2:
+            w = int(X.shape[1])
+        else:
+            w = None  # let each loader's own validation raise
+        candidates = []
+        for i, loader in enumerate(self.loaders):
+            d_raw = loader.X.shape[1]
+            valid = {d_raw, 2 * d_raw} if loader.include_deltas else {d_raw}
+            if w is None or w in valid:
+                candidates.append(i)
+        if not candidates:
+            widths = sorted({w_ for l in self.loaders
+                             for w_ in ({l.X.shape[1], 2 * l.X.shape[1]}
+                                        if l.include_deltas else {l.X.shape[1]})})
+            raise ValueError(
+                f"no crystal in the bank can score a {w}-feature window; "
+                f"feature widths the bank understands: {widths}"
+            )
+        reports = {i: self.loaders[i].check_domain_shift(X, streaming=streaming)
+                   for i in candidates}
+        best = min(reports, key=lambda i: reports[i]["bw_distance"])
         result = dict(reports[best])
         result["domain_index"] = best
-        result["bw_distances"] = [r["bw_distance"] for r in reports]
+        result["bw_distances"] = [reports[i]["bw_distance"] if i in reports else None
+                                  for i in range(len(self.loaders))]
         return result
 
-    def select(self, X_new_stream) -> HologramCrystalLoader:
+    def select(self, X_new_stream, streaming: bool = False) -> HologramCrystalLoader:
         """Return the crystal whose passport is closest to the window."""
-        return self.loaders[self.check_domain_shift(X_new_stream)["domain_index"]]
+        idx = self.check_domain_shift(X_new_stream, streaming=streaming)["domain_index"]
+        return self.loaders[idx]

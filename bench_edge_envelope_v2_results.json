@@ -1,0 +1,77 @@
+{
+ "dataset": "edge_envelope",
+ "title": "Synthetic on-device cost on one CPU core",
+ "data_source": "synthetic: X Gaussian, y=sin(X[:,0])+Gaussian noise",
+ "m": 300,
+ "python": "3.11.15",
+ "platform": "Windows-10-10.0.26200-SP0",
+ "thread_env": 1,
+ "repeats": 3,
+ "cases": [
+  {
+   "case": "synthetic-sensor-4d",
+   "n_features": 4,
+   "n_train_rows": 16000,
+   "crystal_points": 300,
+   "artifact_kb": 28.8837890625,
+   "rss_base_mb": 58.70703125,
+   "rss_after_fit_mb": 59.81640625,
+   "rss_after_load_mb": 60.55078125,
+   "rss_delta_load_mb": 0.734375,
+   "crystal_load_ms": 3.9511000004495145,
+   "radar_ms": {
+    "64": 1.2242500001775625,
+    "256": 3.7548500004049856,
+    "1024": 14.548899999681453
+   },
+   "partial_fit_rows_per_s": 30872.231219091773,
+   "radar_ms_spread": {
+    "64": [
+     1.22365000015634,
+     1.298900000165304
+    ],
+    "256": [
+     2.757449999990058,
+     3.9099499999792897
+    ],
+    "1024": [
+     14.486500000202795,
+     16.5300999997271
+    ]
+   }
+  },
+  {
+   "case": "synthetic-gaussian-sine-81d",
+   "n_features": 81,
+   "n_train_rows": 17010,
+   "crystal_points": 300,
+   "artifact_kb": 184.880859375,
+   "rss_base_mb": 69.25,
+   "rss_after_fit_mb": 71.375,
+   "rss_after_load_mb": 72.19140625,
+   "rss_delta_load_mb": 0.81640625,
+   "crystal_load_ms": 5.295200000546174,
+   "radar_ms": {
+    "64": 1.2411500001690001,
+    "256": 4.725750000034168,
+    "1024": 16.09519999965414
+   },
+   "partial_fit_rows_per_s": 10850.882024887222,
+   "radar_ms_spread": {
+    "64": [
+     1.14865000023201,
+     1.2892499998997664
+    ],
+    "256": [
+     3.3108999996329658,
+     4.886050000095565
+    ],
+    "1024": [
+     16.036699999858683,
+     19.461500000033993
+    ]
+   }
+  }
+ ],
+ "elapsed_sec": 9.7
+}

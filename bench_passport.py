@@ -11,8 +11,10 @@ Single-crystal heal has three passport modes on a strong A -> B shift:
 
 Run 5 seeds on UCI Superconductivity (A: Tc < 40 K, B: Tc >= 40 K), M=200.
 
-Usage: python bench_passport.py --seeds 5
-Writes bench_passport_results.json.
+Usage:
+    python bench_passport.py --seeds 5
+Writes bench_passport_v2_results.json (default). The historical
+bench_passport_results.json is never overwritten by default.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=5)
     ap.add_argument("--crystal-size", type=int, default=200)
+    ap.add_argument("--output", default="bench_passport_v2_results.json")
     args = ap.parse_args()
 
     X, y, _, title = load_superconduct()
@@ -149,10 +152,10 @@ def main() -> None:
         "summary": summary,
         "elapsed_sec": time.perf_counter() - t0,
     }
-    with open("bench_passport_results.json", "w", encoding="utf-8") as f:
+    with open(args.output, "w", encoding="utf-8") as f:
         json.dump(out, f, indent=1)
     print("summary:", json.dumps(summary, indent=1))
-    print("saved -> bench_passport_results.json")
+    print(f"saved -> {args.output}")
 
 
 if __name__ == "__main__":
