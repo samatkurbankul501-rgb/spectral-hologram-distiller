@@ -16,6 +16,7 @@ Regenerate any entry with the script named in the same row, from the repo root.
 | Artifact | Script | Question answered |
 | :--- | :--- | :--- |
 | `bench_seeds_results.json` | `bench_seeds.py` | Headline 20-seed comparison: SHD vs Random / KMeans / KT / SKT on superconductivity (81D) and the 4D reactor. Source of every number in README §1–2. |
+| `bench_frontier_results.json` | `bench_frontier.py` | README §6 operating-point frontier: M=600 `high_band_ratio` sweep {0.26, 0.50, 0.65} vs equal-budget KMeans, both datasets, 20 seeds, plus per-seed wins vs the §1 oracle (joined from `bench_seeds_results.json` via `oracle_source`). Backs the oracle-beating row: SC br=0.65 KRR crit 15.51 vs oracle 17.59, 20/20 seeds. |
 | `bridge_neon_bo_results.json` | `bridge_neon_bo.py` | Does a crystal-fed GP+EI find the hidden phase pocket? README §3. |
 | `bench_heal_superconduct_results.json` | `bench_heal_superconduct.py` | Self-healing on a real physics domain shift. README §4. |
 | `bench_bank_scaling_results.json` | `bench_bank_scaling.py` | Historical result: 10 sequential regimes × 3 drift strengths (`DomainBank` retention vs sequential healing vs frozen, plus routing accuracy; README §4b). New runs default to separate `bench_bank_scaling_v2_results.json`. |

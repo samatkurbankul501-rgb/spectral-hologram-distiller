@@ -220,6 +220,38 @@ check("Holm SC crit", holm["bench_seeds"]["superconduct"]["shd_vs_skt_krr_rmse_c
 check("Holm SC GBM SKT", holm["bench_seeds"]["superconduct"]["shd_vs_skt_gbm_rmse_all"]["p_holm"], 0.2783, 1e-4)
 check("Holm SC KRR-all SKT", holm["bench_seeds"]["superconduct"]["shd_vs_skt_krr_rmse_all"]["p_holm"], 0.0511, 1e-4)
 
+# ------------------------------------------- §6 frontier (bench_frontier.py)
+fr = load("bench_frontier_results.json")["results"]
+for _ds in ("superconduct", "reactor"):
+    _f = fr[_ds]
+    check(f"frontier {_ds} complete", 0 if _f.get("partial") else 1, 1, 0)
+    check(f"frontier {_ds} arm count",
+          1 if all(len(_f["arms"][a]) == 20 for a in _f["arms"]) else 0, 1, 0)
+fsc = fr["superconduct"]
+check("frontier SC br065 krr_crit median",
+      fsc["wilcoxon"]["shd_r0.65"]["krr_rmse_crit"]["median_shd"], 15.5111, 0.0002)
+check("frontier SC br065 krr_crit vs km wins",
+      fsc["wilcoxon"]["shd_r0.65"]["krr_rmse_crit"]["wins_shd"], 20, 0)
+check("frontier SC br065 krr_crit p<1e-4",
+      1 if fsc["wilcoxon"]["shd_r0.65"]["krr_rmse_crit"]["p_value"] < 1e-4 else 0, 1, 0)
+check("frontier SC br065 gbm_all cost delta %",
+      fsc["wilcoxon"]["shd_r0.65"]["gbm_rmse_all"]["delta_median_pct"], 4.5, 0.05)
+check("frontier SC oracle krr joined from seeds",
+      fsc["oracle"]["krr_rmse_crit"], 17.5892, 0.0005)
+check("frontier SC br065 beats oracle krr wins",
+      fsc["vs_oracle"]["shd_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 20, 0)
+check("frontier SC br065 gbm_crit median",
+      fsc["vs_oracle"]["shd_r0.65"]["gbm_rmse_crit"]["median_shd"], 12.0815, 0.0002)
+check("frontier SC br065 beats oracle gbm wins",
+      fsc["vs_oracle"]["shd_r0.65"]["gbm_rmse_crit"]["wins_vs_oracle"], 16, 0)
+frc = fr["reactor"]
+check("frontier reactor br065 krr_crit median",
+      frc["wilcoxon"]["shd_r0.65"]["krr_rmse_crit"]["median_shd"], 2.4049, 0.0002)
+check("frontier reactor br065 krr delta %",
+      frc["wilcoxon"]["shd_r0.65"]["krr_rmse_crit"]["delta_median_pct"], -33.2, 0.05)
+check("frontier reactor br065 beats oracle krr wins",
+      frc["vs_oracle"]["shd_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 20, 0)
+
 # ---------------------------------------------------------------- paper strings
 for text in [
     r"18.6\% of the dataset (3,952 / 21,263; 778 of 4,253 test rows)",

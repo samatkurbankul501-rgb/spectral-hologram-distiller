@@ -465,8 +465,9 @@ telemetry; the default remains `False`.
 
 `high_band_ratio` and `tail_quantile` are **deployment presets, not universal
 constants**. Sweeping them at equal budget (M=600, 20 seeds, paired Wilcoxon
-against KMeans at the same M) shows a monotone frontier: every point wins the
-critical regime, and the price you pay is global fit.
+against KMeans at the same M; `bench_frontier.py` → `bench_frontier_results.json`)
+shows a monotone frontier: every point wins the critical regime, and the price
+you pay is global fit.
 
 **Reactor 4D** (critical = 3% of the stream), vs equal-budget KMeans:
 
@@ -484,20 +485,23 @@ critical regime, and the price you pay is global fit.
 | 0.50 | −16.5%, 20/20 | −34.3%, 20/20 | −0.8% (n.s.) | 238.0 |
 | 0.65 | **−20.9%, 20/20** | **−40.0%, 20/20** | **+4.5%, 3/20 (cost)** | **304.5** |
 
-The working sweep, **not backed by a saved per-seed artifact**, reports that
-at `high_band_ratio=0.65` a 600-point crystal (3.5% of the data) beats the
-oracle reference on both critical metrics of the superconductivity set:
-KRR 15.51 K vs 17.59 K oracle (−11.8%) and GBM 12.08 K vs 12.72 K (−5.0%).
+The committed sweep confirms that at `high_band_ratio=0.65` a 600-point
+crystal (3.5% of the data) beats the full-data oracle reference on both
+critical metrics of the superconductivity set: KRR 15.51 K vs 17.59 K oracle
+(−11.8%, **20/20 seeds**) and GBM 12.08 K vs 12.72 K (−5.0% on the median,
+16/20 seeds). At `high_band_ratio=0.50` the KRR oracle is already beaten
+20/20 (16.38 K, −6.9%). On the reactor the same preset also beats the KRR
+oracle 20/20 (2.40 vs 2.78 K) but not the GBM oracle (median 1.29 vs 1.11 K,
+6/20) — there the oracle-beating regime is KRR-specific.
 
-> **Provenance note (honest status of §6).** The M=600 / `high_band_ratio`
-> sweep runs behind this section were executed as one-off working scripts and
-> their per-seed outputs were **not committed as JSON artifacts** — unlike
-> every other section of this README, §6 currently has no
-> `bench_*_results.json` behind it (§1's oracle denominators 17.59/12.72 are
-> artifact-backed and match; the sweep deltas are not). Treat these numbers
-> as working results pending an artifact commit: before citing the
-> oracle-beating row externally, re-run the sweep with `--save-json` (or
-> equivalent) and commit the artifact next to this README.
+> **Artifact status of §6 (2026-10-22).** The M=600 / `high_band_ratio` sweep
+> is now committed as `bench_frontier_results.json` (canonical): 20 seeds on
+> both datasets, per-seed records for SHD at `high_band_ratio` ∈ {0.26,
+> 0.50, 0.65} and equal-budget K-Means, paired Wilcoxon per metric, and
+> per-seed wins against the §1 oracle joined from `bench_seeds_results.json`
+> (`oracle_source`). Every table delta above is computed from this artifact;
+> the oracle denominators (17.59 K / 12.72 K) are the §1 artifact values.
+> Run it yourself: `python bench_frontier.py --seeds 20 --dataset both`.
 
 **Practical presets:**
 
