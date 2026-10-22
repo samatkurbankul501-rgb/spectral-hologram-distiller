@@ -736,6 +736,65 @@ The v1 hypothesis that representation quality was the bottleneck does not
 survive the corrected protocol; any SHD claim about compressor early warning
 needs a different detector design, not a defence of this one.
 
+### 10. NASA C-MAPSS FD001: remaining useful life on the LOW tail (`bench_cmapss.py`)
+
+The paper's future-work list named the NASA CMAPSS turbofan benchmark; this
+section closes it with the third real dataset — and the first where the
+critical regime lives on the LOW side of the target. Data: pristine FD001
+(`data/cmapss/`, 20,631 train cycles over 100 run-to-failure engines; official
+test protocol = predict RUL at each of the 100 test engines' last cycle).
+Features: the standard 14-sensor FD001 recipe (s1, s5, s10, s16, s18, s19 are
+exactly constant, std = 0). Target: piecewise-linear RUL capped at 125; the
+critical regime is `y <= 25` cycles — the last 25 cycles before failure
+(12.1% of train rows, 19/100 test engines). SHD runs with `tail="low"` and
+the §6 operating-point sweep. Single source of truth:
+`bench_cmapss_results.json`.
+
+**Critical regime (19 near-failure test engines, RMSE median over 20 seeds):**
+
+| Arm (M=300) | KRR RMSE crit | GBM RMSE crit | Rare captured (of 2500) |
+| :--- | :---: | :---: | :---: |
+| SHD br=0.26 (default) | 14.94 | 16.13 | 58.0 |
+| SHD br=0.50 | 15.51 | 15.42 | 107.5 |
+| SHD br=0.65 | **14.53** | **14.01** | **138.5** |
+| Random | 18.05 | 19.77 | 36.5 |
+| K-Means | 16.06 | 17.93 | 53.5 |
+| Kernel Thinning | 17.52 | 18.14 | 34.5 |
+| Supervised KT | 16.60 | 17.98 | 36.0 |
+| Oracle (KRR@9,000 / GBM full pool) | 13.57 | 17.21 | — |
+
+At the critical preset `br=0.65` the crystal significantly beats **all four
+baselines on both models' critical RMSE** — KRR: vs Random 16/20
+($p=2.0\times10^{-3}$), vs K-Means 17/20 ($p=2.1\times10^{-2}$), vs KT 16/20
+($p=5.6\times10^{-3}$), vs SKT 17/20 ($p=2.7\times10^{-3}$); GBM: vs Random
+18/20 ($p=6.3\times10^{-5}$), vs K-Means 17/20 ($p=1.4\times10^{-2}$), vs KT
+18/20 ($p=3.2\times10^{-4}$), vs SKT 18/20 ($p=9.5\times10^{-6}$) — and holds
+138.5 of the 2,500 near-failure medoids (46% of the crystal vs the 12.1%
+population share, a 3.8× over-representation). The GBM crystal even beats the
+**full-pool GBM oracle** on the critical regime, 19/20 seeds (14.01 vs 17.21 K).
+
+**Honest costs and negatives, same artifact:**
+
+- The `br=0.65` global price on FD001 is real, not noise: KRR-all 21.40 K is
+  significantly worse than Random/KT/SKT (best baseline 19.62 K, several
+  $p < 0.05$) — steeper than the +4.5% cost on superconductivity. The
+  capped-RUL target puts 39.9% of training rows on a single mass point
+  (y = 125), so every band cell costs more background coverage than on
+  SC/reactor.
+- The KRR oracle is **not** beaten on FD001 (best arm 8/20 at `br=0.65` crit,
+  0/20 global): the oracle-beating regime of §6 does not transfer
+  automatically — it is a property of a dataset's tail geometry, which is why
+  this section reports baseline wins and oracle wins separately.
+- The default `br=0.26` is the milder operating point: KRR critical beats
+  Random (15/20, $p=2.0\times10^{-3}$) and KT (13/20, $p=1.9\times10^{-2}$),
+  ties K-Means/SKT, keeps global KRR competitive (19.56 K; beats K-Means 19/20,
+  $p=3.2\times10^{-4}$), and posts the best KRR PHM08 asymmetry score of all
+  arms (1092.7 vs 1287.9–1524.0; significant vs Random/KT/SKT).
+
+The §6 lesson repeats on a third real dataset: the band ratio is a deployment
+preset — `br=0.65` when near-failure accuracy is what you pay for, `br=0.26`
+when global fit still matters.
+
 ## Known limitations
 
 - **Negative result: the background-only spectral passport is not a fix.**

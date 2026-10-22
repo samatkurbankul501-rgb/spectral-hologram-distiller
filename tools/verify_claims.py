@@ -252,6 +252,33 @@ check("frontier reactor br065 krr delta %",
 check("frontier reactor br065 beats oracle krr wins",
       frc["vs_oracle"]["shd_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 20, 0)
 
+# ------------------------------------------- C-MAPSS FD001 (bench_cmapss.py)
+cm = load("bench_cmapss_results.json")["results"]["fd001"]
+check("cmapss complete", 0 if cm.get("partial") else 1, 1, 0)
+check("cmapss seed count", len(cm["records"]), 20, 0)
+check("cmapss oracle krr crit", cm["oracle"]["krr_rmse_crit"], 13.574, 0.0005)
+check("cmapss oracle gbm full crit", cm["oracle"]["gbm_full_pool"]["gbm_rmse_crit"], 17.208, 0.0005)
+check("cmapss br065 krr_crit median",
+      cm["wilcoxon"]["shd_r0.65_vs_kt_krr_rmse_crit"]["median_shd"], 14.525, 0.0005)
+check("cmapss br065 krr_crit wins vs kt",
+      cm["wilcoxon"]["shd_r0.65_vs_kt_krr_rmse_crit"]["wins_shd"], 16, 0)
+check("cmapss br065 krr_crit wins vs kmeans",
+      cm["wilcoxon"]["shd_r0.65_vs_kmeans_krr_rmse_crit"]["wins_shd"], 17, 0)
+check("cmapss br065 krr_crit p<0.01 vs kt",
+      1 if cm["wilcoxon"]["shd_r0.65_vs_kt_krr_rmse_crit"]["p_value"] < 0.01 else 0, 1, 0)
+check("cmapss br065 gbm_crit wins vs kt",
+      cm["wilcoxon"]["shd_r0.65_vs_kt_gbm_rmse_crit"]["wins_shd"], 18, 0)
+check("cmapss br065 gbm_crit wins vs skt",
+      cm["wilcoxon"]["shd_r0.65_vs_skt_gbm_rmse_crit"]["wins_shd"], 18, 0)
+check("cmapss br065 gbm beats full-pool oracle at crit",
+      cm["vs_oracle"]["shd_r0.65"]["gbm_rmse_crit"]["wins_vs_oracle"], 19, 0)
+check("cmapss br065 krr oracle NOT beaten (honest negative)",
+      cm["vs_oracle"]["shd_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 8, 0)
+check("cmapss br065 rare median",
+      float(np.median([r["shd_r0.65"]["rare_captured"] for r in cm["records"]])), 138.5, 0.001)
+check("cmapss kmeans krr_crit median",
+      cm["wilcoxon"]["shd_r0.65_vs_kmeans_krr_rmse_crit"]["median_kmeans"], 16.058, 0.0005)
+
 # ---------------------------------------------------------------- paper strings
 for text in [
     r"18.6\% of the dataset (3,952 / 21,263; 778 of 4,253 test rows)",
@@ -281,6 +308,7 @@ for needle in [
 
 for text in [
     "# Spectral Hologram Distiller (SHD v3.12.0)",
+    "### 10. NASA C-MAPSS FD001: remaining useful life on the LOW tail",
     "DomainBank", "passport_recalibrate", 'weighting="uniform"',
     # "196.0" lived in the paper only (PM2.5 guard KRR-crit); the README
     # carries the threshold and the Scania official-cost row instead.
