@@ -278,6 +278,10 @@ class SpectralHologramDistiller:
         self.res_bg_Z, self.res_bg_X, self.res_bg_Y = [], [], []
         self.res_bg_U, self.res_bg_score = [], []
         self._res_peak_rows = 0
+        # Total peak-stratum rows ever OFFERED to the reservoir (v3.12.0):
+        # algorithm-R replacement needs the offer count, not the retained
+        # count, so late peaks get a fair chance against early ones.
+        self._res_peak_seen = 0
         self._res_bg_rows = 0
         self._reservoir_rows = 0
         self._rows_since_rebuild = 0
@@ -493,10 +497,17 @@ class SpectralHologramDistiller:
         The reservoir is split in two strata so that the retained sample
         represents the WHOLE stream rather than only its most recent rows:
 
-        * the *peak* stratum keeps every row whose standardised target is
-          above ``peak_z_threshold`` (the critical / rare regime). Such rows
-          are rare by construction, so the stratum rarely fills, and a regime
-          that appears LATE in the stream is still represented;
+        * the *peak* stratum keeps rows whose standardised target is above
+          ``peak_z_threshold`` (the critical / rare regime), sampled
+          UNIFORMLY over the whole stream: while the stratum is not full
+          every peak row is kept, and once it is full each new peak row
+          replaces a uniformly random retained slot (Vitter's algorithm R).
+          v3.12.0: the stratum used to keep the FIRST ``peak_cap`` peaks and
+          silently drop every later one on the assumption that peaks are
+          rare -- but a target drift that pushes most of the stream above
+          the trigger fills the stratum with the FIRST drifted batches, and
+          the late part of the drift, exactly what a rebuild exists to
+          cover, was gone (measured: 544 of 6,000 drifted rows retained);
         * the *background* stratum keeps the most recent rows up to its cap.
 
         This is what makes a lattice rebuild able to cover late regimes while
@@ -506,7 +517,8 @@ class SpectralHologramDistiller:
         peak_cap = max(1, int(cap * 0.4))
         bg_cap = max(1, cap - peak_cap)
 
-        y_flat = np.asarray(y_B, dtype=np.float64).reshape(-1)
+        y_B = np.asarray(y_B, dtype=np.float64)
+        y_flat = y_B.reshape(-1)
         y_z = np.abs((y_flat - self.y_mean) / self.y_std) if len(y_flat) else np.zeros(0)
         is_peak = y_z > float(self.peak_z_threshold)
         if len(y_flat) != len(X_B):
@@ -517,10 +529,32 @@ class SpectralHologramDistiller:
                 continue
             idx = np.nonzero(mask)[0]
             if store == "peak":
+                self._res_peak_seen += len(idx)
                 room = peak_cap - self._res_peak_rows
-                if room <= 0:
-                    continue
-                idx = idx[:room]
+                fill = idx[:room] if room > 0 else idx[:0]
+                overflow = idx[len(fill):]
+                if len(fill):
+                    self.res_peak_Z.append(np.array(Z_B[fill], dtype=np.float64, copy=True))
+                    self.res_peak_X.append(np.array(X_B[fill], dtype=np.float64, copy=True))
+                    self.res_peak_Y.append(np.array(y_B[fill], dtype=np.float64, copy=True))
+                    self.res_peak_U.append(np.array(U_B[fill], dtype=np.float64, copy=True))
+                    self.res_peak_score.append(np.array(score_B[fill], dtype=np.float64, copy=True))
+                    self._res_peak_rows += len(fill)
+                if len(overflow):
+                    # Algorithm R (Vitter 1985): peak row t replaces retained
+                    # slot j ~ U[0, t) when j < peak_cap, so every peak row --
+                    # early or late -- keeps inclusion probability
+                    # peak_cap / n_peaks_seen.
+                    t_arr = np.arange(self._res_peak_seen - len(overflow) + 1,
+                                      self._res_peak_seen + 1)
+                    j_arr = (self.rng.random(len(overflow)) * t_arr).astype(np.int64)
+                    for r_i, j in enumerate(j_arr):
+                        if j < peak_cap:
+                            self._res_peak_replace(
+                                int(j),
+                                Z_B[overflow[r_i]], X_B[overflow[r_i]], y_B[overflow[r_i]],
+                                U_B[overflow[r_i]], score_B[overflow[r_i]],
+                            )
             else:
                 room = bg_cap - self._res_bg_rows
                 if room <= 0:
@@ -536,15 +570,6 @@ class SpectralHologramDistiller:
                     if room <= 0:
                         continue
                     idx = idx[:room]
-
-            if store == "peak":
-                self.res_peak_Z.append(np.array(Z_B[idx], dtype=np.float64, copy=True))
-                self.res_peak_X.append(np.array(X_B[idx], dtype=np.float64, copy=True))
-                self.res_peak_Y.append(np.array(y_B[idx], dtype=np.float64, copy=True))
-                self.res_peak_U.append(np.array(U_B[idx], dtype=np.float64, copy=True))
-                self.res_peak_score.append(np.array(score_B[idx], dtype=np.float64, copy=True))
-                self._res_peak_rows += len(idx)
-            else:
                 self.res_bg_Z.append(np.array(Z_B[idx], dtype=np.float64, copy=True))
                 self.res_bg_X.append(np.array(X_B[idx], dtype=np.float64, copy=True))
                 self.res_bg_Y.append(np.array(y_B[idx], dtype=np.float64, copy=True))
@@ -552,6 +577,25 @@ class SpectralHologramDistiller:
                 self.res_bg_score.append(np.array(score_B[idx], dtype=np.float64, copy=True))
                 self._res_bg_rows += len(idx)
         self._reservoir_rows = self._res_peak_rows + self._res_bg_rows
+
+    def _res_peak_replace(self, j, z_row, x_row, y_row, u_row, s_row):
+        """Overwrite flat peak-stratum slot ``j`` (v3.12.0 algorithm R).
+
+        The peak stratum is stored as per-batch arrays; slot ``j`` indexes
+        the concatenation of those batches in insertion order.
+        """
+        c = 0
+        for bi, arr in enumerate(self.res_peak_Z):
+            n = len(arr)
+            if j < c + n:
+                slot = j - c
+                self.res_peak_Z[bi][slot] = z_row
+                self.res_peak_X[bi][slot] = x_row
+                self.res_peak_Y[bi][slot] = y_row
+                self.res_peak_U[bi][slot] = u_row
+                self.res_peak_score[bi][slot] = s_row
+                return
+            c += n
 
     # --- public API -----------------------------------------------------------
 
@@ -980,6 +1024,10 @@ class SpectralHologramDistiller:
             include_deltas=np.array(bool(self.include_deltas)),
             high_band_ratio=np.array([float(self.high_band_ratio)], dtype=np.float64),
             passport_reference=np.array(self.passport_reference),
+            critical_threshold=np.array(
+                [np.nan if self.critical_threshold is None else float(self.critical_threshold)],
+                dtype=np.float64,
+            ),
             y_labelled=np.ones(len(self.crystal_Y), dtype=bool),
         )
         if include_projector:
@@ -1070,6 +1118,30 @@ class HologramCrystalLoader:
         else:
             self.passport_reference = "stream"
 
+        # The critical band's fixed target cut (y >= critical_threshold), if
+        # the crystal was distilled with one. The peak slice, the budget slice
+        # and heal's protected band all read the SAME definition the lattice
+        # was built with (v3.12.0); legacy artifacts predate the field and
+        # have no threshold-driven band.
+        if "critical_threshold" in data.files:
+            ct = float(np.asarray(data["critical_threshold"]).reshape(-1)[0])
+            self.critical_threshold = None if np.isnan(ct) else ct
+        else:
+            self.critical_threshold = None
+
+        # Per-deployment radar calibration (v3.12.0). Legacy artifacts and
+        # uncalibrated loaders fall back to the rank-scaled default constant.
+        if "tau_calibrated" in data.files:
+            self.tau_calibrated = float(np.asarray(data["tau_calibrated"]).reshape(-1)[0])
+            self.tau_window = int(np.asarray(data["tau_window"]).reshape(-1)[0])
+            self.tau_n_windows = int(np.asarray(data["tau_n_windows"]).reshape(-1)[0])
+            self.tau_fa_rate = float(np.asarray(data["tau_fa_rate"]).reshape(-1)[0])
+        else:
+            self.tau_calibrated = None
+            self.tau_window = None
+            self.tau_n_windows = None
+            self.tau_fa_rate = None
+
         self._prev_row = None  # last raw row of the previous streaming radar call
 
         if "Omega" in data.files:
@@ -1154,8 +1226,11 @@ class HologramCrystalLoader:
         Intended for warm-starting Bayesian Optimization (e.g. NEON Lab GP+EI)
         around phase transitions without fitting a cubic O(N^3) GP on the full
         telemetry stream. If ``y_threshold`` is given, selects medoids with
-        ``y >= y_threshold``; otherwise selects the ``high_band_ratio`` fraction
-        of medoids that are most extreme in the crystal's ``tail`` direction:
+        ``y >= y_threshold``; a crystal distilled with ``critical_threshold``
+        instead serves the medoids above that threshold -- the same band the
+        lattice was built from (v3.12.0); otherwise selects the
+        ``high_band_ratio`` fraction of medoids that are most extreme in the
+        crystal's ``tail`` direction:
         the top by ``y`` for ``tail="high"``, the bottom for ``tail="low"``, and
         the most extreme relative to the median for ``tail="both"``. Rows are
         returned in the band's rank order (ascending ``y`` for ``"high"`` /
@@ -1188,21 +1263,42 @@ class HologramCrystalLoader:
         w_p /= np.mean(w_p)
         return X_p, y_p, w_p
 
-    def _peak_rank_idx(self, n_medoids: int, high_band_ratio: float) -> np.ndarray:
+    def _peak_rank_idx(self, n_medoids: int, high_band_ratio: float, y=None) -> np.ndarray:
         """Indices of the phase-peak band, in the band's rank order.
 
-        ``tail="high"`` returns the ``k_top`` largest-y medoids in ascending-y
-        order (bitwise-compatible with the v3.7 slice ordering); ``"low"``
-        returns the smallest-y medoids, also ascending in y; ``"both"``
-        returns the most extreme medoids relative to the median, in ascending
-        extremeness order.
+        A crystal distilled with ``critical_threshold`` defines its critical
+        band on the UPPER target side (``y >= critical_threshold``), and the
+        slice, the budget slice and heal's protected band must read back the
+        SAME band the lattice was built from: exactly the medoids above the
+        threshold, at most the band quota ``k_top`` (keeping the largest
+        ``y``). v3.11.1 let ``tail="both"`` re-rank that band by
+        extremeness-from-median and served LOW-side rows the band was never
+        built from (measured: 7 of 18 slice rows below the threshold).
+
+        Without a threshold, ``tail="high"`` returns the ``k_top`` largest-y
+        medoids in ascending-y order (bitwise-compatible with the v3.7 slice
+        ordering); ``"low"`` returns the smallest-y medoids, also ascending
+        in y; ``"both"`` returns the most extreme medoids relative to the
+        median, in ascending extremeness order. ``y`` overrides the ranked
+        target column (heal protects the OLD medoids' band while new rows
+        are already appended).
         """
+        y_ref = self.y if y is None else np.asarray(y, dtype=np.float64)
         k_top = max(1, int(round(n_medoids * high_band_ratio)))
+        if self.critical_threshold is not None:
+            above = np.where(y_ref >= float(self.critical_threshold))[0]
+            if len(above) > 0:
+                above = above[np.argsort(y_ref[above])]
+                if len(above) > k_top:
+                    above = above[-k_top:]
+                return above
+            # Degenerate crystal: no medoid sits above the threshold. Fall
+            # through to the tail-based ranking rather than return nothing.
         if self.tail == "high":
-            return np.argsort(self.y)[-k_top:]
+            return np.argsort(y_ref)[-k_top:]
         if self.tail == "low":
-            return np.argsort(self.y)[:k_top]
-        rank = np.abs(self.y - np.median(self.y))  # "both"
+            return np.argsort(y_ref)[:k_top]
+        rank = np.abs(y_ref - np.median(y_ref))  # "both"
         return np.argsort(rank)[-k_top:]
 
     def _normalize_stream(
@@ -1289,6 +1385,15 @@ class HologramCrystalLoader:
     def _calibrated_threshold(self, n_batch: int, adaptive_threshold: bool = True) -> float:
         if not adaptive_threshold:
             return float(BW_ALERT_THRESHOLD)
+        if self.tau_calibrated is not None:
+            # v3.12.0: per-deployment quantile calibration (calibrate_threshold).
+            # tau was measured at tau_window rows; smaller windows widen by the
+            # same finite-sample 1/sqrt(B) factor as the default path. No extra
+            # rank factor: the measured distances already live on this
+            # passport's rank.
+            b_eff = max(int(n_batch), 16)
+            w_ref = max(int(self.tau_window), 16)
+            return float(self.tau_calibrated) * max(1.0, float(np.sqrt(float(w_ref) / b_eff)))
         # Finite-sample covariance fluctuation scales as 1 / sqrt(B). For batches
         # smaller than 1024 rows, widen the threshold smoothly so small sensor
         # windows do not trigger false alarms from sampling noise alone. The
@@ -1297,7 +1402,15 @@ class HologramCrystalLoader:
         # threshold while true OOD windows (BW ~0.44+) are still detected.
         b_eff = max(int(n_batch), 16)
         sample_scale = max(1.0, float(np.sqrt(1024.0 / b_eff)))
-        return float(BW_ALERT_THRESHOLD * sample_scale)
+        # v3.12.0: the BW distance between two independent estimates of the
+        # SAME distribution grows ~ sqrt(rank) with the passport's subspace
+        # rank, while BW_ALERT_THRESHOLD was calibrated at the shipped rank
+        # of 32. rank_passport=128 therefore tripped the radar on perfectly
+        # in-distribution windows (measured: in-dist BW 0.161 vs the unscaled
+        # threshold); scale the base by sqrt(rank / 32) so every rank keeps
+        # its in-distribution headroom. A rank-32 crystal is bit-identical.
+        rank_scale = float(np.sqrt(len(self.eigvals) / 32.0))
+        return float(BW_ALERT_THRESHOLD * sample_scale * rank_scale)
 
     def check_domain_shift(
         self,
@@ -1308,10 +1421,10 @@ class HologramCrystalLoader:
     ) -> dict:
         """Compare a new data stream against the spectral passport.
 
-        Projects the new stream's RFF spectrum onto the 32-dim eigen-subspace of
-        the passport and computes a Bures-Wasserstein distance (32x32 matrices
-        instead of 256x256). Returns ``bw_distance``, ``threshold``,
-        ``latency_ms`` and ``is_shifted``.
+        Projects the new stream's RFF spectrum onto the passport's
+        eigen-subspace and computes a Bures-Wasserstein distance (32x32
+        matrices instead of 256x256). Returns ``bw_distance``, ``threshold``,
+        ``threshold_source``, ``latency_ms`` and ``is_shifted``.
 
         With ``streaming=True`` and a delta crystal
         (``include_deltas=True`` at distillation time), the first-difference of
@@ -1319,10 +1432,36 @@ class HologramCrystalLoader:
         raw row instead of defaulting to zero, matching the distiller's
         cross-batch continuity. Non-delta crystals ignore the flag; the default
         ``False`` keeps every call an independent, stateless window.
+
+        The threshold is the per-deployment quantile calibration when
+        ``calibrate_threshold()`` has been run (``threshold_source:
+        "calibrated"``), otherwise the rank-scaled default constant
+        (``threshold_source: "default"``).
         """
         t0 = time.perf_counter()
-        _Z, U_new = self._prepare_stream(
+        bw_dist, n_rows = self._bw_distance(
             X_new_stream, distiller_ref=distiller_ref, remember_prev_row=streaming
+        )
+        thr = self._calibrated_threshold(n_rows, adaptive_threshold=adaptive_threshold)
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+
+        return {
+            "bw_distance": bw_dist,
+            "threshold": thr,
+            "threshold_source": "calibrated" if self.tau_calibrated is not None else "default",
+            "latency_ms": latency_ms,
+            "is_shifted": bw_dist > thr,
+        }
+
+    def _bw_distance(self, X_stream, distiller_ref=None, remember_prev_row=False):
+        """BW distance between the passport and one window: ``(distance, rows)``.
+
+        Shared by the radar (check_domain_shift) and threshold calibration
+        (calibrate_threshold) so both score windows with bit-identical
+        arithmetic.
+        """
+        _Z, U_new = self._prepare_stream(
+            X_stream, distiller_ref=distiller_ref, remember_prev_row=remember_prev_row
         )
         Psi_new = (U_new.T @ U_new) / len(U_new)
 
@@ -1341,14 +1480,72 @@ class HologramCrystalLoader:
         # features of a 1-D single-row window (81 features -> batch of 81),
         # which inflated the threshold and made the same point decide
         # differently as (d,) vs (1, d).
-        thr = self._calibrated_threshold(len(U_new), adaptive_threshold=adaptive_threshold)
-        latency_ms = (time.perf_counter() - t0) * 1000.0
+        return bw_dist, len(U_new)
 
+    def calibrate_threshold(self, X_ref, *, window: int, fa_rate: float = 0.01) -> dict:
+        """Calibrate the radar threshold on healthy reference windows (v3.12.0).
+
+        The default threshold is a constant calibrated on the UCI
+        Superconductivity heal benchmark at passport rank 32; a different
+        domain, rank or window size silently changed its meaning (the
+        MetroPT protocol-v2 negative result had to push tau above every real
+        leak to hold the false-alarm budget on healthy data). This method
+        replaces the constant with a quantile of the radar's OWN distances
+        over healthy windows from the deployment stream:
+
+            tau = quantile(distances, 1 - fa_rate)
+
+        so roughly ``fa_rate`` of windows drawn from the same healthy regime
+        cross the threshold, whatever the domain, rank or window size.
+
+        Parameters
+        ----------
+        X_ref:
+            2-D healthy reference stream, at least ``10 * window`` rows.
+        window:
+            Rows per window (>= 8). Non-overlapping windows are taken from
+            the start of the stream.
+        fa_rate:
+            Nominal false-alarm fraction among healthy windows, in (0, 0.5).
+
+        Stores the calibration on the loader (``save()`` persists it) and
+        returns a report dict. ``check_domain_shift`` picks it up
+        automatically; ``heal_domain_shift`` invalidates it when the
+        passport moves. The reference must be healthy with respect to the
+        SAME crystal the deployment will use.
+        """
+        X_ref = np.asarray(X_ref, dtype=np.float64)
+        if X_ref.ndim == 1:
+            X_ref = X_ref.reshape(1, -1)
+        if X_ref.ndim != 2:
+            raise ValueError(f"X_ref must be 2-D (rows, features), got shape {X_ref.shape}")
+        window = int(window)
+        if window < 8:
+            raise ValueError(f"window must be >= 8 rows, got {window}")
+        if not 0.0 < float(fa_rate) < 0.5:
+            raise ValueError(f"fa_rate must be in (0, 0.5), got {fa_rate}")
+        n_windows = len(X_ref) // window
+        if n_windows < 10:
+            raise ValueError(
+                f"a {1.0 - float(fa_rate):.0%} quantile needs at least 10 windows of "
+                f"{window} rows; got {n_windows} from {len(X_ref)} rows -- provide at "
+                f"least {10 * window} healthy rows"
+            )
+        dists = np.empty(n_windows, dtype=np.float64)
+        for w_i in range(n_windows):
+            dists[w_i], _ = self._bw_distance(X_ref[w_i * window:(w_i + 1) * window])
+        tau = float(np.quantile(dists, 1.0 - float(fa_rate)))
+        self.tau_calibrated = tau
+        self.tau_window = window
+        self.tau_n_windows = n_windows
+        self.tau_fa_rate = float(fa_rate)
         return {
-            "bw_distance": bw_dist,
-            "threshold": thr,
-            "latency_ms": latency_ms,
-            "is_shifted": bw_dist > thr,
+            "tau": tau,
+            "window": window,
+            "n_windows": n_windows,
+            "fa_rate": float(fa_rate),
+            "dist_median": float(np.median(dists)),
+            "dist_max": float(np.max(dists)),
         }
 
     def heal_domain_shift(
@@ -1451,14 +1648,12 @@ class HologramCrystalLoader:
                 raise ValueError(f"max_crystal_size must be >= 1, got {max_crystal_size}")
             n_old_now = len(self.X)
             protected_pre = np.zeros(n_old_now, dtype=bool)
-            n_protect_old = max(1, int(round(self.high_band_ratio * n_old_now)))
-            y_old_now = self.y[:n_old_now]
-            if self.tail == "high":
-                protected_pre[np.argsort(y_old_now)[-n_protect_old:]] = True
-            elif self.tail == "low":
-                protected_pre[np.argsort(y_old_now)[:n_protect_old]] = True
-            else:  # "both": most extreme relative to the old median
-                protected_pre[np.argsort(np.abs(y_old_now - np.median(y_old_now)))[-n_protect_old:]] = True
+            # v3.12.0: the protected band is the SAME set the peak slice would
+            # serve -- the tail direction, or y >= critical_threshold for a
+            # threshold-distilled crystal. The inline tail logic protected
+            # low-side medoids for a tail="both" + critical_threshold crystal
+            # whose band was built from the UPPER side.
+            protected_pre[self._peak_rank_idx(n_old_now, self.high_band_ratio, y=self.y[:n_old_now])] = True
             n_protect_weight = int(round(float(protect_old_weight_frac) * n_old_now))
             if n_protect_weight > 0:
                 protected_pre[np.argsort(self.weights[:n_old_now])[-n_protect_weight:]] = True
@@ -1573,16 +1768,10 @@ class HologramCrystalLoader:
             excess = len(self.X) - cap
             if excess > 0:
                 # Protect the phase-peak band among old medoids + all new
-                # medoids; the band direction follows the crystal's tail mode
-                # and its size follows the persisted high_band_ratio.
-                n_protect_old = max(1, int(round(self.high_band_ratio * n_old)))
-                y_old = self.y[:n_old]
-                if self.tail == "high":
-                    peak_old_idx = np.argsort(y_old)[-n_protect_old:]
-                elif self.tail == "low":
-                    peak_old_idx = np.argsort(y_old)[:n_protect_old]
-                else:  # "both": most extreme relative to the old median
-                    peak_old_idx = np.argsort(np.abs(y_old - np.median(y_old)))[-n_protect_old:]
+                # medoids; the band is the same set the peak slice would
+                # serve (tail direction, or the critical threshold's upper
+                # side), sized by the persisted high_band_ratio (v3.12.0).
+                peak_old_idx = self._peak_rank_idx(n_old, self.high_band_ratio, y=self.y[:n_old])
                 protected = np.zeros(len(self.X), dtype=bool)
                 protected[peak_old_idx] = True
                 n_protect_weight = int(round(float(protect_old_weight_frac) * n_old))
@@ -1637,6 +1826,14 @@ class HologramCrystalLoader:
         self.eigvecs = eigvecs[:, -rank_p:].astype(np.float64)
         self.Psi_passport = (self.eigvecs * self.eigvals) @ self.eigvecs.T
         self.n_seen += n_total
+        # v3.12.0: the passport just moved (blended or replaced), so a
+        # threshold calibrated against the OLD eigenpairs no longer
+        # describes this radar. Drop the calibration instead of silently
+        # scoring windows against a stale quantile.
+        self.tau_calibrated = None
+        self.tau_window = None
+        self.tau_n_windows = None
+        self.tau_fa_rate = None
 
         after = self.check_domain_shift(X_win, distiller_ref=distiller_ref)
         return {
@@ -1675,7 +1872,18 @@ class HologramCrystalLoader:
             high_band_ratio=np.array([float(self.high_band_ratio)], dtype=np.float64),
             passport_reference=np.array(self.passport_reference),
             y_labelled=self.y_labelled.astype(bool),
+            critical_threshold=np.array(
+                [np.nan if self.critical_threshold is None else float(self.critical_threshold)],
+                dtype=np.float64,
+            ),
         )
+        if getattr(self, "tau_calibrated", None) is not None:
+            # v3.12.0: the per-deployment quantile calibration travels with
+            # the crystal. heal_domain_shift clears it when the passport moves.
+            payload["tau_calibrated"] = np.array([float(self.tau_calibrated)], dtype=np.float64)
+            payload["tau_window"] = np.array([int(self.tau_window)], dtype=np.int64)
+            payload["tau_n_windows"] = np.array([int(self.tau_n_windows)], dtype=np.int64)
+            payload["tau_fa_rate"] = np.array([float(self.tau_fa_rate)], dtype=np.float64)
         if self.Omega is not None and self.phase is not None:
             payload["Omega"] = self.Omega.astype(np.float32)
             payload["phase"] = self.phase.astype(np.float32)

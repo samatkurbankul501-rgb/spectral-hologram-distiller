@@ -1,4 +1,22 @@
-# Spectral Hologram Distiller (SHD v3.11.1)
+# Spectral Hologram Distiller (SHD v3.12.0)
+
+> **v3.12.0 (2026-10-22): round-2 repairs + per-deployment radar calibration.**
+> The second defect hunt (probes in `tools/hunt/round2_probes.py`, regressions
+> in `tests/test_v312_repairs.py`) found and fixed three more suppressors of
+> the method's true performance, each reproduced live before the fix: a
+> `tail="both"` crystal distilled with `critical_threshold` was read back by
+> extremeness-from-median, so the peak slice, the budget slice and heal's
+> protected band could serve LOW-side rows the band was never built from (the
+> threshold now travels with the artifact); the rebuild reservoir's peak
+> stratum kept the FIRST `peak_cap` peaks and silently dropped every later
+> one, so a target drift past the trigger lost its late part (peaks are now
+> sampled uniformly, Vitter algorithm R); and the radar threshold was
+> hard-wired for passport rank 32, so `rank_passport >= 128` tripped false
+> alarms on in-distribution windows (the base now scales with
+> `sqrt(rank/32)`). New: `loader.calibrate_threshold(X_healthy, window=...,
+> fa_rate=...)` — a per-deployment quantile of the radar's own distances over
+> healthy windows, persisted with the crystal and invalidated by heal — the
+> recommended replacement for the cross-dataset `0.085` constant.
 
 > **Repair status (v3.11.1, 2026-10-21):** the v3.11.0 code review found and
 > fixed four defects in this tree, each reproduced before the fix:
@@ -81,6 +99,10 @@ report = loader.check_domain_shift(X_new_stream)  # BW radar, self-contained
 print(report)  # {'bw_distance': ..., 'latency_ms': ..., 'is_shifted': False}
 # Delta crystals can carry first differences across radar calls:
 # loader.check_domain_shift(X_new_stream, streaming=True)
+# v3.12.0: calibrate the radar threshold on YOUR healthy windows (recommended
+# over the cross-dataset 0.085 constant; persisted with the crystal):
+loader.calibrate_threshold(X_healthy, window=256, fa_rate=0.01)
+report = loader.check_domain_shift(X_new_stream)  # threshold_source: "calibrated"
 
 # Surgical self-healing when a new regime arrives (bounded forgetting):
 heal_info = loader.heal_domain_shift(X_drifted, y_drifted, n_inject=35)
@@ -150,7 +172,11 @@ python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-c
   `B ≥ 1024` uses the classic `0.085`. `check_domain_shift(..., adaptive_threshold=True)`
   (default) returns the used `threshold` inside the report. Calibrated on the
   UCI Superconductivity heal benchmark (0/20 false alarms on in-distribution
-  windows of 64 rows, 20/20 detections on true OOD windows).
+  windows of 64 rows, 20/20 detections on true OOD windows). Since v3.12.0
+  the base also scales with the passport rank as `0.085 · sqrt(rank/32)`
+  (a `rank_passport >= 128` passport otherwise tripped false alarms on
+  in-distribution windows), and `calibrate_threshold()` can replace the
+  cross-dataset constant with a per-deployment quantile over healthy windows.
 - **Bounded crystals.** `heal_domain_shift(..., max_crystal_size=220)` prunes
   only low-weight *background* medoids when the cap is exceeded; the top-26%
   phase-peak band and every newly injected medoid are always protected, and the
@@ -775,6 +801,11 @@ needs a different detector design, not a defence of this one.
   both 20/20) but on the reactor they cost critical KRR (3.426 vs 3.335; uniform
   wins 20/20). See `bench_weights_*_results.json`.
 - **OOD threshold:** the base `BW_ALERT_THRESHOLD = 0.085` (auto-widened for
-  small batches as `0.085·sqrt(1024/B)`) is calibrated on the superconductivity
-  heal benchmark, not a distribution-free constant. For a new domain, re-check
-  the radar's in-distribution false-alarm rate on your own data.
+  small batches as `0.085·sqrt(1024/B)`, rank-scaled as `0.085·sqrt(rank/32)`
+  since v3.12.0) is calibrated on the superconductivity heal benchmark, not a
+  distribution-free constant. For a new domain prefer
+  `loader.calibrate_threshold(X_healthy, window=..., fa_rate=...)`, which
+  stores a per-deployment quantile of the radar's own distances over healthy
+  windows (persisted by `save()`, invalidated by `heal_domain_shift`);
+  otherwise re-check the radar's in-distribution false-alarm rate on your own
+  data.

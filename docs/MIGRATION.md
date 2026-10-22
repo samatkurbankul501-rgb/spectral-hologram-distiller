@@ -47,5 +47,6 @@ proof, so they are still recoverable from the trash.
   one-shot. They are kept because the audit chain is the provenance of the
   published numbers, not because they are a maintained toolchain.
 - `tools/verify_claims.py` and `tools/hunt_probes.py` are the maintained
-  entry points: the first is the gate (217 checks), the second reproduces the
+  entry points: the first is the gate (217 checks at migration time; it has
+  since grown with each release), the second reproduces the
   v3.11.1 defect fixes on demand.

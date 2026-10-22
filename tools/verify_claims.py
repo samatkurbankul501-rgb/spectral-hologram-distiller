@@ -248,7 +248,7 @@ for needle in [
     check_absent("paper stale " + needle, needle)
 
 for text in [
-    "# Spectral Hologram Distiller (SHD v3.11.1)",
+    "# Spectral Hologram Distiller (SHD v3.12.0)",
     "DomainBank", "passport_recalibrate", 'weighting="uniform"',
     # "196.0" lived in the paper only (PM2.5 guard KRR-crit); the README
     # carries the threshold and the Scania official-cost row instead.
@@ -298,14 +298,14 @@ check("artifact size KB", size_kb, 97.7, 0.2)
 check("compression ratio", 21263 / 300, 70.88, 0.02)
 
 version = (ROOT / "shd" / "__init__.py").read_text(encoding="utf-8")
-check_text("version 3.11.1", '__version__ = "3.11.1"', version)
+check_text("version 3.12.0", '__version__ = "3.12.0"', version)
 pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-check_text("pyproject 3.11.1", 'version = "3.11.1"', pyproject)
+check_text("pyproject 3.12.0", 'version = "3.12.0"', pyproject)
 # The three version carriers must agree; this is the check that would have
 # caught the v3.10.0/v3.11.0 drift before it reached the README title.
 check("version carriers agree",
-      1 if ('__version__ = "3.11.1"' in version and 'version = "3.11.1"' in pyproject
-            and "SHD v3.11.1" in README) else 0, 1, 0)
+      1 if ('__version__ = "3.12.0"' in version and 'version = "3.12.0"' in pyproject
+            and "SHD v3.12.0" in README) else 0, 1, 0)
 
 print(f"\n{checks} checks, {len(failures)} failures")
 if failures:
