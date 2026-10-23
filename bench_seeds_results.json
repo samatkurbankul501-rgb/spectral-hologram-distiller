@@ -8,6 +8,8 @@
    "dataset": "superconduct",
    "title": "UCI Superconductivity",
    "crystal_size": 300,
+   "batch": 2500,
+   "model_seed": 42,
    "n_seeds": 20,
    "seeds": [
     0,
@@ -1220,12 +1222,14 @@
      "p_value": 0.069580078125
     }
    },
-   "elapsed_sec": 2487.869590099999
+   "elapsed_sec": 2238.5157136999987
   },
   "reactor": {
    "dataset": "reactor",
    "title": "Reactor 4D (phase transition)",
    "crystal_size": 300,
+   "batch": 2500,
+   "model_seed": 42,
    "n_seeds": 20,
    "seeds": [
     0,
@@ -2438,7 +2442,7 @@
      "p_value": 0.001209259033203125
     }
    },
-   "elapsed_sec": 196.67503959999885
+   "elapsed_sec": 143.40623330000017
   }
  }
 }

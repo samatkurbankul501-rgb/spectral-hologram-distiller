@@ -12,6 +12,13 @@ same drift compensation -- the comparison is the score, not the plumbing):
   z_detrend   : the engineer's baseline -- per-feature z-score of the window
                 mean against the training minutes, max over features,
                 EWMA-detrended.
+  shd_radar   : the v3.13.0 combined radar -- the loader's
+                check_domain_shift(mean_shift=True) scores every contiguous
+                window (bw_distance + mean_shift_distance) and alarms under
+                the same FA budget replay. This is the library path behind
+                the 4/4 leak detection (FA 0.000/month vs budget 1.0).
+                (tools/proto_metro_bw.py validated it first; v3.13.0 moved
+                it into the loader).
   iforest_detrend : IsolationForest on healthy minutes, mean window anomaly
                 score, EWMA-detrended. The standard "just buy a model" answer.
   shd_raw     : diagnostic context -- SHD WITHOUT drift compensation, to show
@@ -141,6 +148,19 @@ def score_feature_z(X_learn, X_slice, win, step, *, minutes):
     return np.asarray(idx, dtype=np.int64), np.asarray(scores)
 
 
+def score_shd_radar(loader, X_slice, win, step, *, minutes):
+    """Combined-radar arm (v3.13.0): loader.check_domain_shift(mean_shift=True)
+    on every contiguous window; the combined score is what the radar alarms on.
+    Returns (end-row indices, combined scores), matching window_scores' convention.
+    """
+    ends, scores = [], []
+    for lo, hi in window_bounds(minutes, win, step):
+        rep = loader.check_domain_shift(X_slice[lo:hi], mean_shift=True)
+        ends.append(hi - 1)
+        scores.append(rep["combined_distance"])
+    return np.asarray(ends, dtype=np.int64), np.asarray(scores, dtype=np.float64)
+
+
 def score_iforest(forest, X_slice, win, step, *, minutes):
     idx, scores = [], []
     for lo, hi in window_bounds(minutes, win, step):
@@ -237,7 +257,14 @@ def run(output="bench_metro_watch_v2_results.json",
     i_idx_w, i_w = score_iforest(forest, X[w_lo:w_hi], WIN, STEP, minutes=mw)
     assert np.array_equal(idx_c, i_idx_c) and np.array_equal(idx_w, i_idx_w)
     rep_i, _ = run_arm("iforest_detrend", incidents, i_c, i_w, m_c, m_w,
-                       extra={"fit_sec": round(if_fit_s, 1)})
+                        extra={"fit_sec": round(if_fit_s, 1)})
+
+    # v3.13.0 combined radar (library path: check_domain_shift(mean_shift=True))
+    r_idx_c, r_c = score_shd_radar(loader, X[c_lo:c_hi], WIN, STEP, minutes=mc)
+    r_idx_w, r_w = score_shd_radar(loader, X[w_lo:w_hi], WIN, STEP, minutes=mw)
+    assert np.array_equal(idx_c, r_idx_c) and np.array_equal(idx_w, r_idx_w)
+    rep_radar, _ = run_arm("shd_radar", incidents, r_c, r_w, m_c, m_w,
+                            extra={"radar": "bw_distance + mean_shift_distance (v3.13.0)"})
 
     results = {
         "dataset": "metropt3_watch", "title": "Early warning on a real metro APU",
@@ -251,7 +278,7 @@ def run(output="bench_metro_watch_v2_results.json",
                      "max_lead_days": MAX_LEAD_DAYS,
                      "features": list(feats)},
         "n_minutes": int(len(minutes)),
-        "arms": [rep_shd, rep_z, rep_i, rep_raw],
+        "arms": [rep_shd, rep_z, rep_i, rep_raw, rep_radar],
         "incidents_truth": incidents,
         "elapsed_sec": round(time.perf_counter() - t0, 1),
     }

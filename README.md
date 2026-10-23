@@ -1,4 +1,16 @@
-# Spectral Hologram Distiller (SHD v3.12.0)
+# Spectral Hologram Distiller (SHD v3.12.1)
+
+> **v3.12.1 (2026-10-22): round-2 probe B — the anytime budget slice now
+> honours the requested row count.** `get_training_data(budget_points=k,
+> drop_unlabelled=True)` used to admit the peak band FIRST and then drop
+> unlabelled heal placeholders AFTER the budget was spent, so the slice
+> silently returned fewer rows than requested (reproduced in
+> `tools/hunt/round2_probes.py` probe B: budget 60 returned 30 rows, 30 of
+> which were healed median placeholders). The drop now happens first and the
+> budget is spent on the remaining labelled rows (regressions in
+> `tests/test_v312_1_repairs.py`). Crystals without placeholder rows and
+> budget-less calls are bit-identical to v3.12.0, so published benchmark
+> numbers are unchanged.
 
 > **v3.12.0 (2026-10-22): round-2 repairs + per-deployment radar calibration.**
 > The second defect hunt (probes in `tools/hunt/round2_probes.py`, regressions

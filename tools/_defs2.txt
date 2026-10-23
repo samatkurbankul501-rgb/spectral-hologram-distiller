@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "C:\Users\User\Downloads\New folder\_release\spectral-hologram-distiller\tools\scan_defs.py", line 8, in <module>
+    open("tools/_defs.txt", "w", encoding="utf-8").write("\n".join(out))
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: 'tools/_defs.txt'

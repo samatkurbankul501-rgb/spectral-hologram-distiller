@@ -1,0 +1,69 @@
+6:    (256 harmonics, row-normalised). Two accumulators ``Psi_sum = U^T U`` and
+17:    between ``sum_i g_i u_i u_i^T`` and the streamed ``Psi_hat``. This is
+22: 5. **16-bit spectral passport + OOD radar.** The top-32 eigenpairs of ``Psi_hat``
+36: __all__ = ["SpectralHologramDistiller", "HologramCrystalLoader", "BW_ALERT_THRESHOLD"]
+39: BW_ALERT_THRESHOLD = 0.085
+258:         self.Psi_sum = np.zeros((self.k, self.k), dtype=np.float64)
+262:         self.Psi_bg_sum = np.zeros((self.k, self.k), dtype=np.float64)
+609:         ``s_i = u_i^T (Psi_hat + beta_low I)^(-1) u_i`` via Cholesky factorization
+708:                 self.Psi_sum += U_B.T @ U_B
+710:                 Psi_hat = self.Psi_sum / self.n_seen
+712:                 L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
+722:                 self.Psi_sum += U_B.T @ U_B
+724:                 Psi_hat = self.Psi_sum / self.n_seen
+726:                 L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
+743:             self.Psi_sum += U_B.T @ U_B
+747:             Psi_hat = self.Psi_sum / self.n_seen
+751:             L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
+805:                 self.Psi_bg_sum += U_B[bg_mask].T @ U_B[bg_mask]
+867:             # accumulators (Psi_sum / Phi_sum) keep covering the whole stream.
+917:         Psi_hat = self.Psi_sum / self.n_seen
+920:         b = np.sum((self.crystal_U @ Psi_hat) * self.crystal_U, axis=1) + self.fista_l2_reg * voronoi_prob
+935:         Psi_crystal = (self.crystal_U.T * gamma_prob) @ self.crystal_U
+940:             linalg.norm(Psi_crystal - Psi_hat, ord="fro") / linalg.norm(Psi_hat, ord="fro")
+954:         Psi_exported = (self.crystal_U.T * exported_prob) @ self.crystal_U
+955:         rel_error = linalg.norm(Psi_exported - Psi_hat, ord="fro") / linalg.norm(Psi_hat, ord="fro")
+979:         changes the meaning of ``bw_distance``; the loader records the rank it
+992:             # error, but it does change what bw_distance means, so the effective
+1005:         Psi_hat = self.Psi_sum / self.n_seen
+1010:             Psi_ref = self.Psi_bg_sum / self.n_bg
+1012:             Psi_ref = Psi_hat
+1013:         eigvals, eigvecs = linalg.eigh(Psi_ref)
+1019:             passport_eigvecs=eigvecs[:, -rank:].astype(np.float16),
+1061:         self.eigvals = data["passport_eigvals"].astype(np.float64)
+1062:         self.eigvecs = data["passport_eigvecs"].astype(np.float64)
+1081:         self.k_dim = self.eigvecs.shape[0]
+1155:         self.Psi_passport = (self.eigvecs * self.eigvals) @ self.eigvecs.T
+1395:             return float(BW_ALERT_THRESHOLD)
+1415:         # rank, while BW_ALERT_THRESHOLD was calibrated at the shipped rank
+1420:         rank_scale = float(np.sqrt(len(self.eigvals) / 32.0))
+1421:         return float(BW_ALERT_THRESHOLD * sample_scale * rank_scale)
+1432:         Projects the new stream's RFF spectrum onto the passport's
+1434:         matrices instead of 256x256). Returns ``bw_distance``, ``threshold``,
+1450:         bw_dist, n_rows = self._bw_distance(
+1457:             "bw_distance": bw_dist,
+1461:             "is_shifted": bw_dist > thr,
+1464:     def _bw_distance(self, X_stream, distiller_ref=None, remember_prev_row=False):
+1474:         Psi_new = (U_new.T @ U_new) / len(U_new)
+1476:         V = self.eigvecs  # (k, 32)
+1477:         A_sub = np.diag(np.maximum(self.eigvals, 1e-7))
+1478:         B_sub = V.T @ Psi_new @ V + 1e-7 * np.eye(len(self.eigvals))
+1486:         bw_dist = float(np.sqrt(max(0.0, np.trace(A_sub) + np.trace(B_sub) - 2.0 * np.sum(np.sqrt(eig_inner)))))
+1491:         return bw_dist, len(U_new)
+1544:             dists[w_i], _ = self._bw_distance(X_ref[w_i * window:(w_i + 1) * window])
+1632:                 "bw_before": shift["bw_distance"],
+1633:                 "bw_after": shift["bw_distance"],
+1756:                 proj = U_new[med_idx] @ self.eigvecs
+1822:         Psi_new = (U_new.T @ U_new) / max(len(U_new), 1)
+1829:         Psi_blend = (1.0 - alpha_blend) * self.Psi_passport + alpha_blend * Psi_new
+1830:         Psi_blend = 0.5 * (Psi_blend + Psi_blend.T)
+1831:         rank_p = len(self.eigvals)
+1832:         eigvals, eigvecs = linalg.eigh(Psi_blend)
+1833:         self.eigvals = eigvals[-rank_p:].astype(np.float64)
+1834:         self.eigvecs = eigvecs[:, -rank_p:].astype(np.float64)
+1835:         self.Psi_passport = (self.eigvecs * self.eigvals) @ self.eigvecs.T
+1858:             "bw_before": shift["bw_distance"],
+1859:             "bw_after": after["bw_distance"],
+1873:             passport_eigvals=self.eigvals.astype(np.float16),
+1874:             passport_eigvecs=self.eigvecs.astype(np.float16),
+1912:             "passport_rank": int(len(self.eigvals)),

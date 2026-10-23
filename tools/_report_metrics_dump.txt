@@ -1,0 +1,242 @@
+=== superconduct (UCI Superconductivity)
+n_seeds: 20 | oracle: {'krr_rmse_all': 12.864627300138583, 'krr_rmse_crit': 17.589187999079858, 'krr_r2': 0.8562232248783317, 'gbm_rmse_all': 10.269761690137836, 'gbm_rmse_crit': 12.716448114815822, 'gbm_r2': 0.9083747753580175}
+shd    krr_rmse_crit  median=18.805 iqr=0.935 (n=20)
+random krr_rmse_crit  median=22.426 iqr=2.489 (n=20)
+shd    gbm_rmse_crit  median=18.714 iqr=3.215 (n=20)
+random gbm_rmse_crit  median=22.565 iqr=2.487 (n=20)
+shd    krr_rmse_all   median=15.423 iqr=0.250 (n=20)
+random krr_rmse_all   median=16.582 iqr=0.535 (n=20)
+shd    gbm_rmse_all   median=16.065 iqr=0.655 (n=20)
+random gbm_rmse_all   median=16.380 iqr=0.837 (n=20)
+shd    krr_r2         median=0.793 iqr=0.007 (n=20)
+random krr_r2         median=0.761 iqr=0.015 (n=20)
+shd    gbm_r2         median=0.776 iqr=0.018 (n=20)
+random gbm_r2         median=0.767 iqr=0.024 (n=20)
+shd    krr_rmse_crit  median=18.805 iqr=0.935 (n=20)
+kmeans krr_rmse_crit  median=22.926 iqr=3.176 (n=20)
+shd    gbm_rmse_crit  median=18.714 iqr=3.215 (n=20)
+kmeans gbm_rmse_crit  median=23.154 iqr=2.472 (n=20)
+shd    krr_rmse_all   median=15.423 iqr=0.250 (n=20)
+kmeans krr_rmse_all   median=17.338 iqr=0.549 (n=20)
+shd    gbm_rmse_all   median=16.065 iqr=0.655 (n=20)
+kmeans gbm_rmse_all   median=17.189 iqr=0.971 (n=20)
+shd    krr_r2         median=0.793 iqr=0.007 (n=20)
+kmeans krr_r2         median=0.739 iqr=0.017 (n=20)
+shd    gbm_r2         median=0.776 iqr=0.018 (n=20)
+kmeans gbm_r2         median=0.743 iqr=0.029 (n=20)
+shd    krr_rmse_crit  median=18.805 iqr=0.935 (n=20)
+kt     krr_rmse_crit  median=23.256 iqr=2.229 (n=20)
+shd    gbm_rmse_crit  median=18.714 iqr=3.215 (n=20)
+kt     gbm_rmse_crit  median=22.251 iqr=2.368 (n=20)
+shd    krr_rmse_all   median=15.423 iqr=0.250 (n=20)
+kt     krr_rmse_all   median=16.465 iqr=0.455 (n=20)
+shd    gbm_rmse_all   median=16.065 iqr=0.655 (n=20)
+kt     gbm_rmse_all   median=16.553 iqr=1.052 (n=20)
+shd    krr_r2         median=0.793 iqr=0.007 (n=20)
+kt     krr_r2         median=0.764 iqr=0.013 (n=20)
+shd    gbm_r2         median=0.776 iqr=0.018 (n=20)
+kt     gbm_r2         median=0.762 iqr=0.031 (n=20)
+shd    krr_rmse_crit  median=18.805 iqr=0.935 (n=20)
+skt    krr_rmse_crit  median=21.195 iqr=1.642 (n=20)
+shd    gbm_rmse_crit  median=18.714 iqr=3.215 (n=20)
+skt    gbm_rmse_crit  median=21.393 iqr=2.060 (n=20)
+shd    krr_rmse_all   median=15.423 iqr=0.250 (n=20)
+skt    krr_rmse_all   median=15.777 iqr=0.305 (n=20)
+shd    gbm_rmse_all   median=16.065 iqr=0.655 (n=20)
+skt    gbm_rmse_all   median=15.967 iqr=0.869 (n=20)
+shd    krr_r2         median=0.793 iqr=0.007 (n=20)
+skt    krr_r2         median=0.784 iqr=0.008 (n=20)
+shd    gbm_r2         median=0.776 iqr=0.018 (n=20)
+skt    gbm_r2         median=0.779 iqr=0.024 (n=20)
+shd_vs_random_krr_rmse_all -> wins 20/20 p=1.91e-06
+shd_vs_kmeans_krr_rmse_all -> wins 20/20 p=1.91e-06
+shd_vs_kt_krr_rmse_all -> wins 20/20 p=1.91e-06
+shd_vs_skt_krr_rmse_all -> wins 17/20 p=0.00639
+shd_vs_random_krr_rmse_crit -> wins 20/20 p=1.91e-06
+shd_vs_kmeans_krr_rmse_crit -> wins 20/20 p=1.91e-06
+shd_vs_kt_krr_rmse_crit -> wins 20/20 p=1.91e-06
+shd_vs_skt_krr_rmse_crit -> wins 20/20 p=1.91e-06
+shd_vs_random_krr_r2 -> wins 20/20 p=1.91e-06
+shd_vs_kmeans_krr_r2 -> wins 20/20 p=1.91e-06
+shd_vs_kt_krr_r2 -> wins 20/20 p=1.91e-06
+shd_vs_skt_krr_r2 -> wins 17/20 p=0.00639
+shd_vs_random_gbm_rmse_all -> wins 13/20 p=0.277
+shd_vs_kmeans_gbm_rmse_all -> wins 18/20 p=9.54e-06
+shd_vs_kt_gbm_rmse_all -> wins 15/20 p=0.0328
+shd_vs_skt_gbm_rmse_all -> wins 6/20 p=0.0696
+shd_vs_random_gbm_rmse_crit -> wins 17/20 p=0.000134
+shd_vs_kmeans_gbm_rmse_crit -> wins 20/20 p=1.91e-06
+shd_vs_kt_gbm_rmse_crit -> wins 17/20 p=0.00102
+shd_vs_skt_gbm_rmse_crit -> wins 17/20 p=0.000322
+shd_vs_random_gbm_r2 -> wins 13/20 p=0.277
+shd_vs_kmeans_gbm_r2 -> wins 18/20 p=9.54e-06
+shd_vs_kt_gbm_r2 -> wins 15/20 p=0.0328
+shd_vs_skt_gbm_r2 -> wins 6/20 p=0.0696
+=== reactor (Reactor 4D (phase transition))
+n_seeds: 20 | oracle: {'krr_rmse_all': 0.8043875871884892, 'krr_rmse_crit': 2.7800327043117212, 'krr_r2': 0.8094066923352179, 'gbm_rmse_all': 0.38219682998039806, 'gbm_rmse_crit': 1.1079298001250777, 'gbm_r2': 0.9569720071387169}
+shd    krr_rmse_crit  median=3.436 iqr=0.225 (n=20)
+random krr_rmse_crit  median=4.424 iqr=0.814 (n=20)
+shd    gbm_rmse_crit  median=1.732 iqr=0.579 (n=20)
+random gbm_rmse_crit  median=2.409 iqr=0.549 (n=20)
+shd    krr_rmse_all   median=0.976 iqr=0.021 (n=20)
+random krr_rmse_all   median=1.134 iqr=0.104 (n=20)
+shd    gbm_rmse_all   median=0.624 iqr=0.092 (n=20)
+random gbm_rmse_all   median=0.711 iqr=0.081 (n=20)
+shd    krr_r2         median=0.720 iqr=0.012 (n=20)
+random krr_r2         median=0.621 iqr=0.070 (n=20)
+shd    gbm_r2         median=0.885 iqr=0.034 (n=20)
+random gbm_r2         median=0.851 iqr=0.034 (n=20)
+shd    krr_rmse_crit  median=3.436 iqr=0.225 (n=20)
+kmeans krr_rmse_crit  median=4.390 iqr=0.722 (n=20)
+shd    gbm_rmse_crit  median=1.732 iqr=0.579 (n=20)
+kmeans gbm_rmse_crit  median=2.033 iqr=0.572 (n=20)
+shd    krr_rmse_all   median=0.976 iqr=0.021 (n=20)
+kmeans krr_rmse_all   median=1.069 iqr=0.073 (n=20)
+shd    gbm_rmse_all   median=0.624 iqr=0.092 (n=20)
+kmeans gbm_rmse_all   median=0.596 iqr=0.079 (n=20)
+shd    krr_r2         median=0.720 iqr=0.012 (n=20)
+kmeans krr_r2         median=0.663 iqr=0.046 (n=20)
+shd    gbm_r2         median=0.885 iqr=0.034 (n=20)
+kmeans gbm_r2         median=0.895 iqr=0.027 (n=20)
+shd    krr_rmse_crit  median=3.436 iqr=0.225 (n=20)
+kt     krr_rmse_crit  median=4.516 iqr=0.833 (n=20)
+shd    gbm_rmse_crit  median=1.732 iqr=0.579 (n=20)
+kt     gbm_rmse_crit  median=2.382 iqr=0.772 (n=20)
+shd    krr_rmse_all   median=0.976 iqr=0.021 (n=20)
+kt     krr_rmse_all   median=1.129 iqr=0.030 (n=20)
+shd    gbm_rmse_all   median=0.624 iqr=0.092 (n=20)
+kt     gbm_rmse_all   median=0.719 iqr=0.113 (n=20)
+shd    krr_r2         median=0.720 iqr=0.012 (n=20)
+kt     krr_r2         median=0.625 iqr=0.020 (n=20)
+shd    gbm_r2         median=0.885 iqr=0.034 (n=20)
+kt     gbm_r2         median=0.848 iqr=0.047 (n=20)
+shd    krr_rmse_crit  median=3.436 iqr=0.225 (n=20)
+skt    krr_rmse_crit  median=4.060 iqr=0.347 (n=20)
+shd    gbm_rmse_crit  median=1.732 iqr=0.579 (n=20)
+skt    gbm_rmse_crit  median=2.432 iqr=0.811 (n=20)
+shd    krr_rmse_all   median=0.976 iqr=0.021 (n=20)
+skt    krr_rmse_all   median=1.056 iqr=0.029 (n=20)
+shd    gbm_rmse_all   median=0.624 iqr=0.092 (n=20)
+skt    gbm_rmse_all   median=0.695 iqr=0.128 (n=20)
+shd    krr_r2         median=0.720 iqr=0.012 (n=20)
+skt    krr_r2         median=0.672 iqr=0.018 (n=20)
+shd    gbm_r2         median=0.885 iqr=0.034 (n=20)
+skt    gbm_r2         median=0.858 iqr=0.054 (n=20)
+shd_vs_random_krr_rmse_all -> wins 20/20 p=1.91e-06
+shd_vs_kmeans_krr_rmse_all -> wins 20/20 p=1.91e-06
+shd_vs_kt_krr_rmse_all -> wins 20/20 p=1.91e-06
+shd_vs_skt_krr_rmse_all -> wins 20/20 p=1.91e-06
+shd_vs_random_krr_rmse_crit -> wins 20/20 p=1.91e-06
+shd_vs_kmeans_krr_rmse_crit -> wins 20/20 p=1.91e-06
+shd_vs_kt_krr_rmse_crit -> wins 18/20 p=9.54e-06
+shd_vs_skt_krr_rmse_crit -> wins 20/20 p=1.91e-06
+shd_vs_random_krr_r2 -> wins 20/20 p=1.91e-06
+shd_vs_kmeans_krr_r2 -> wins 20/20 p=1.91e-06
+shd_vs_kt_krr_r2 -> wins 20/20 p=1.91e-06
+shd_vs_skt_krr_r2 -> wins 20/20 p=1.91e-06
+shd_vs_random_gbm_rmse_all -> wins 16/20 p=0.000708
+shd_vs_kmeans_gbm_rmse_all -> wins 8/20 p=0.245
+shd_vs_kt_gbm_rmse_all -> wins 16/20 p=0.0073
+shd_vs_skt_gbm_rmse_all -> wins 14/20 p=0.00169
+shd_vs_random_gbm_rmse_crit -> wins 18/20 p=0.000168
+shd_vs_kmeans_gbm_rmse_crit -> wins 13/20 p=0.0637
+shd_vs_kt_gbm_rmse_crit -> wins 14/20 p=0.00271
+shd_vs_skt_gbm_rmse_crit -> wins 16/20 p=0.000586
+shd_vs_random_gbm_r2 -> wins 16/20 p=0.00169
+shd_vs_kmeans_gbm_r2 -> wins 8/20 p=0.294
+shd_vs_kt_gbm_r2 -> wins 16/20 p=0.00639
+shd_vs_skt_gbm_r2 -> wins 14/20 p=0.00121
+=== metro v2 arms:
+shd_detrend | tau=0.621 | calib_episodes=0 | FA/month=0.000 | calib_windows=994 | watch_windows=4192
+   other keys: {'calibration_alert_fraction': 0.0, 'watch_episodes': 0, 'unmatched_episodes': 0, 'unmatched_fa_per_month_calendar': 0.0, 'watch_exposure_months': 2.869, 'watch_calendar_months': 3.767, 'incidents': [{'name': 'Air leak #1', 'start': '2020-04-18 00:00', 'first_alert': None, 'lead_hours': None, 'detected': False}, {'name': 'Air leak #2', 'start': '2020-05-29 23:30', 'first_alert': None, 'lead_hours': None, 'detected': False}, {'name': 'Air leak #3', 'start': '2020-06-05 10:00', 'first_alert': None, 'lead_hours': None, 'detected': False}, {'name': 'Air leak #4', 'start': '2020-07-15 14:30', 'first_alert': None, 'lead_hours': None, 'detected': False}], 'learn_sec': 6.8, 'crystal_kb': 55.4, 'watch_scan_sec': 47.9}
+z_detrend | tau=12.325 | calib_episodes=0 | FA/month=1.743 | calib_windows=994 | watch_windows=4192
+   other keys: {'calibration_alert_fraction': 0.0, 'watch_episodes': 15, 'unmatched_episodes': 5, 'unmatched_fa_per_month_calendar': 1.327, 'watch_exposure_months': 2.869, 'watch_calendar_months': 3.767, 'incidents': [{'name': 'Air leak #1', 'start': '2020-04-18 00:00', 'first_alert': '2020-04-12T12:43', 'lead_hours': 131.28333333333333, 'detected': True}, {'name': 'Air leak #2', 'start': '2020-05-29 23:30', 'first_alert': '2020-05-13T14:36', 'lead_hours': 392.9, 'detected': True}, {'name': 'Air leak #3', 'start': '2020-06-05 10:00', 'first_alert': '2020-05-19T02:35', 'lead_hours': 415.4166666666667, 'detected': True}, {'name': 'Air leak #4', 'start': '2020-07-15 14:30', 'first_alert': '2020-07-08T18:49', 'lead_hours': 163.68333333333334, 'detected': True}]}
+iforest_detrend | tau=0.224 | calib_episodes=0 | FA/month=0.000 | calib_windows=994 | watch_windows=4192
+   other keys: {'calibration_alert_fraction': 0.0, 'watch_episodes': 2, 'unmatched_episodes': 0, 'unmatched_fa_per_month_calendar': 0.0, 'watch_exposure_months': 2.869, 'watch_calendar_months': 3.767, 'incidents': [{'name': 'Air leak #1', 'start': '2020-04-18 00:00', 'first_alert': None, 'lead_hours': None, 'detected': False}, {'name': 'Air leak #2', 'start': '2020-05-29 23:30', 'first_alert': '2020-05-13T15:06', 'lead_hours': 392.4, 'detected': True}, {'name': 'Air leak #3', 'start': '2020-06-05 10:00', 'first_alert': '2020-05-19T23:27', 'lead_hours': 394.55, 'detected': True}, {'name': 'Air leak #4', 'start': '2020-07-15 14:30', 'first_alert': None, 'lead_hours': None, 'detected': False}], 'fit_sec': 1.1}
+shd_raw | tau=1.192 | calib_episodes=0 | FA/month=0.000 | calib_windows=994 | watch_windows=4192
+   other keys: {'calibration_alert_fraction': 0.0, 'watch_episodes': 0, 'unmatched_episodes': 0, 'unmatched_fa_per_month_calendar': 0.0, 'watch_exposure_months': 2.869, 'watch_calendar_months': 3.767, 'incidents': [{'name': 'Air leak #1', 'start': '2020-04-18 00:00', 'first_alert': None, 'lead_hours': None, 'detected': False}, {'name': 'Air leak #2', 'start': '2020-05-29 23:30', 'first_alert': None, 'lead_hours': None, 'detected': False}, {'name': 'Air leak #3', 'start': '2020-06-05 10:00', 'first_alert': None, 'lead_hours': None, 'detected': False}, {'name': 'Air leak #4', 'start': '2020-07-15 14:30', 'first_alert': None, 'lead_hours': None, 'detected': False}]}
+shd_radar | tau=11.549 | calib_episodes=0 | FA/month=0.697 | calib_windows=994 | watch_windows=4192
+   other keys: {'calibration_alert_fraction': 0.0, 'watch_episodes': 13, 'unmatched_episodes': 2, 'unmatched_fa_per_month_calendar': 0.531, 'watch_exposure_months': 2.869, 'watch_calendar_months': 3.767, 'incidents': [{'name': 'Air leak #1', 'start': '2020-04-18 00:00', 'first_alert': '2020-04-12T12:43', 'lead_hours': 131.28333333333333, 'detected': True}, {'name': 'Air leak #2', 'start': '2020-05-29 23:30', 'first_alert': '2020-05-13T14:06', 'lead_hours': 393.4, 'detected': True}, {'name': 'Air leak #3', 'start': '2020-06-05 10:00', 'first_alert': '2020-05-18T05:39', 'lead_hours': 436.35, 'detected': True}, {'name': 'Air leak #4', 'start': '2020-07-15 14:30', 'first_alert': '2020-07-15T18:23', 'lead_hours': 0.0, 'detected': True}], 'radar': 'bw_distance + mean_shift_distance (v3.13.0)'}
+pm25 top keys: ['dataset', 'title', 'n_total', 'n_train', 'n_test', 'n_test_crit', 'crit_threshold', 'n_features', 'n_seeds', 'records', 'elapsed_sec', 'wilcoxon']
+=== pm25
+n_seeds: 20 oracle: None
+shd    krr_rmse_crit  median=231.010 iqr=22.492
+random krr_rmse_crit  median=248.920 iqr=30.683
+shd    gbm_rmse_crit  median=211.909 iqr=14.712
+random gbm_rmse_crit  median=225.512 iqr=28.936
+shd    krr_rmse_all   median=95.083 iqr=6.547
+random krr_rmse_all   median=88.237 iqr=7.475
+shd    gbm_rmse_all   median=86.111 iqr=4.715
+random gbm_rmse_all   median=80.046 iqr=5.464
+shd    krr_r2         median=-0.017 iqr=0.144
+random krr_r2         median=0.124 iqr=0.152
+shd    gbm_r2         median=0.166 iqr=0.091
+random gbm_r2         median=0.279 iqr=0.099
+shd    krr_rmse_crit  median=231.010 iqr=22.492
+kmeans krr_rmse_crit  median=241.175 iqr=28.867
+shd    gbm_rmse_crit  median=211.909 iqr=14.712
+kmeans gbm_rmse_crit  median=213.791 iqr=27.797
+shd    krr_rmse_all   median=95.083 iqr=6.547
+kmeans krr_rmse_all   median=88.920 iqr=3.878
+shd    gbm_rmse_all   median=86.111 iqr=4.715
+kmeans gbm_rmse_all   median=78.311 iqr=2.373
+shd    krr_r2         median=-0.017 iqr=0.144
+kmeans krr_r2         median=0.111 iqr=0.078
+shd    gbm_r2         median=0.166 iqr=0.091
+kmeans gbm_r2         median=0.310 iqr=0.042
+shd    krr_rmse_crit  median=231.010 iqr=22.492
+kt     krr_rmse_crit  median=245.739 iqr=33.747
+shd    gbm_rmse_crit  median=211.909 iqr=14.712
+kt     gbm_rmse_crit  median=228.814 iqr=19.747
+shd    krr_rmse_all   median=95.083 iqr=6.547
+kt     krr_rmse_all   median=89.887 iqr=5.587
+shd    gbm_rmse_all   median=86.111 iqr=4.715
+kt     gbm_rmse_all   median=79.848 iqr=4.163
+shd    krr_r2         median=-0.017 iqr=0.144
+kt     krr_r2         median=0.091 iqr=0.111
+shd    gbm_r2         median=0.166 iqr=0.091
+kt     gbm_r2         median=0.283 iqr=0.075
+shd    krr_rmse_crit  median=231.010 iqr=22.492
+skt    krr_rmse_crit  median=246.021 iqr=23.148
+shd    gbm_rmse_crit  median=211.909 iqr=14.712
+skt    gbm_rmse_crit  median=221.185 iqr=20.845
+shd    krr_rmse_all   median=95.083 iqr=6.547
+skt    krr_rmse_all   median=86.527 iqr=1.589
+shd    gbm_rmse_all   median=86.111 iqr=4.715
+skt    gbm_rmse_all   median=78.873 iqr=2.713
+shd    krr_r2         median=-0.017 iqr=0.144
+skt    krr_r2         median=0.158 iqr=0.031
+shd    gbm_r2         median=0.166 iqr=0.091
+skt    gbm_r2         median=0.300 iqr=0.048
+shd_vs_random_krr_rmse_all -> wins 3/20 p=0.000395
+shd_vs_random_krr_rmse_crit -> wins 15/20 p=0.0121
+shd_vs_random_krr_r2 -> wins 3/20 p=0.000586
+shd_vs_random_gbm_rmse_all -> wins 4/20 p=0.00199
+shd_vs_random_gbm_rmse_crit -> wins 12/20 p=0.0897
+shd_vs_random_gbm_r2 -> wins 4/20 p=0.00233
+shd_vs_kmeans_krr_rmse_all -> wins 4/20 p=0.000483
+shd_vs_kmeans_krr_rmse_crit -> wins 11/20 p=0.277
+shd_vs_kmeans_krr_r2 -> wins 4/20 p=0.000708
+shd_vs_kmeans_gbm_rmse_all -> wins 1/20 p=5.72e-06
+shd_vs_kmeans_gbm_rmse_crit -> wins 12/20 p=0.43
+shd_vs_kmeans_gbm_r2 -> wins 1/20 p=5.72e-06
+shd_vs_kt_krr_rmse_all -> wins 2/20 p=8.2e-05
+shd_vs_kt_krr_rmse_crit -> wins 13/20 p=0.216
+shd_vs_kt_krr_r2 -> wins 2/20 p=8.2e-05
+shd_vs_kt_gbm_rmse_all -> wins 2/20 p=4.77e-05
+shd_vs_kt_gbm_rmse_crit -> wins 14/20 p=0.0637
+shd_vs_kt_gbm_r2 -> wins 2/20 p=4.77e-05
+shd_vs_skt_krr_rmse_all -> wins 1/20 p=5.72e-06
+shd_vs_skt_krr_rmse_crit -> wins 14/20 p=0.0328
+shd_vs_skt_krr_r2 -> wins 1/20 p=5.72e-06
+shd_vs_skt_gbm_rmse_all -> wins 0/20 p=1.91e-06
+shd_vs_skt_gbm_rmse_crit -> wins 14/20 p=0.0484
+shd_vs_skt_gbm_r2 -> wins 0/20 p=1.91e-06
+=== cmapss fd001
+Traceback (most recent call last):
+  File "C:\Users\User\Downloads\New folder\_release\spectral-hologram-distiller\tools\report_metrics_dump.py", line 109, in <module>
+    dump_cmapss()
+  File "C:\Users\User\Downloads\New folder\_release\spectral-hologram-distiller\tools\report_metrics_dump.py", line 75, in dump_cmapss
+    print("n_seeds:", res["n_seeds"], "oracle:", res.get("oracle"), "m:", res.get("m"))
+                      ~~~^^^^^^^^^^^
+KeyError: 'n_seeds'

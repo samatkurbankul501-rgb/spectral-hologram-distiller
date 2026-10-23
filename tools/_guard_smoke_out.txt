@@ -1,0 +1,11 @@
+guard report: {'swapped': 20, 'n_pool': 6000, 'weight': 0.35, 'resid_z_mean': 0.9366324456700357, 'damp': 0.5163602428720129, 'n_low_weight_reordered': 20, 'min_old_weight': 0.28188248867265026, 'guard_weight_mean': 0.18072608500520446}
+rows changed: 20
+crystal_U consistent: OK
+resid stats: {'n_pool': 6000, 'resid_median': -0.013950757584877849, 'resid_mad': 0.7047429046461408}
+loader loaded: (80, 4)
+healthy: {'bw_distance': 0.2473, 'threshold': 0.34, 'threshold_source': 'default', 'latency_ms': 0.5966, 'mean_shift_distance': 0.1401, 'combined_distance': 0.3874, 'combined_threshold': 0.34, 'combined_threshold_source': 'default', 'is_shifted': True}
+shifted: {'bw_distance': 0.7825, 'threshold': 0.34, 'threshold_source': 'default', 'latency_ms': 0.401, 'mean_shift_distance': 3.5532, 'combined_distance': 4.3358, 'combined_threshold': 0.34, 'combined_threshold_source': 'default', 'is_shifted': True}
+ms calib: {'tau': 0.6062970771077352, 'window': 64, 'n_windows': 31, 'fa_rate': 0.05, 'combined_median': 0.48567056147425536, 'combined_max': 0.7401165829200946}
+ms tau persisted: 0.6062970771077352
+heal invalidated both calibrations: OK
+ALL GUARD/RADAR SMOKE CHECKS PASSED

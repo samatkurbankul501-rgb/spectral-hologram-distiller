@@ -297,6 +297,12 @@ class SpectralHologramDistiller:
         self.crystal_U = None
         self.gamma_weights = None
 
+        # v3.13.0: robust residual statistics for the global-donor guard's
+        # residual-aware donor scores. Fitted by fit_residual_stats() / lazily
+        # inside build_global_guard(); None until then.
+        self._resid_mean = None
+        self._resid_std = None
+
     # --- internals -----------------------------------------------------------
 
     def _init_projector(self, X_batch: np.ndarray, y_batch: np.ndarray):
@@ -598,6 +604,247 @@ class SpectralHologramDistiller:
             c += n
 
     # --- public API -----------------------------------------------------------
+
+    def _guard_pool(self):
+        """Collect the representative pool for the global-donor guard.
+
+        The pool is everything the distiller still holds: the warm-up buffer
+        (rows the lattice has not consumed yet) plus both reservoir strata
+        (peak: uniform over the whole stream; background: most recent). With
+        ``lattice_rebuild_interval > 0`` the reservoir covers the whole
+        stream, so the pool is a bounded uniform-ish sample of everything seen;
+        with the default (no rebuild) it is the warm-up window plus late rows.
+        Returns ``(X_pool, y_pool)`` or ``None`` when nothing is held.
+        """
+        parts_X = list(self.init_X) + list(self.res_bg_X) + list(self.res_peak_X)
+        parts_Y = list(self.init_Y) + list(self.res_bg_Y) + list(self.res_peak_Y)
+        if not parts_X:
+            return None
+        return np.vstack(parts_X), np.vstack(parts_Y)
+
+    def _pool_predict(self, X_pool: np.ndarray) -> np.ndarray:
+        """Map a pool through the crystal's ridge map (batched to bound memory).
+
+        The predictor is the same ridge map the crystal's own phase score is
+        built from: kernel ridge in the RFF sketch with the exported
+        (blended) ``gamma_weights`` as the kernel weights. Chunks of 8192 rows
+        keep the (chunk x k) sketch at a few MB even for a multi-million-row
+        pool.
+        """
+        w_prob = self.gamma_weights / float(np.sum(self.gamma_weights))
+        G = (self.crystal_U.T * w_prob) @ self.crystal_U
+        A = G + self.fista_l2_reg * np.eye(G.shape[0])
+        B = (self.crystal_U.T * w_prob) @ self.crystal_Y[:, None]
+        W = linalg.cho_solve(linalg.cho_factor(A, lower=True), B)
+        W = W.reshape(G.shape[0])  # (k,1) -> (k,)
+        out = np.empty((len(X_pool), 1), dtype=np.float64)
+        step = 8192
+        for lo in range(0, len(X_pool), step):
+            _Z, U_c = self._spectral_transform(X_pool[lo:lo + step], update_state=False)
+            out[lo:lo + step] = (U_c @ W)[:, None]
+        return out
+
+    def fit_residual_stats(self, X_pool=None, y_pool=None) -> dict:
+        """Fit robust residual statistics for the guard's residual-aware scores.
+
+        The guard scores donor rows by the crystal's ridge residual
+        ``r(x) = y - f(x)`` (residual-aware, v3.13.0): rows the crystal's own
+        model already predicts well add little new information, so their
+        guard weight is damped. This method fits the residual scale on a
+        representative pool -- by default everything the distiller holds
+        (warm-up buffer + reservoir); the caller may pass an explicit pool.
+        The statistic is the robust median and MAD of the residual, so one
+        wild residual cannot blow up the scale.
+
+        Must be called AFTER the crystal exists (after ``finalize_crystal`` /
+        ``build_global_guard``): the ridge map reads the crystal's own
+        predictor.
+        """
+        if self.crystal_X is None:
+            raise ValueError(
+                "fit_residual_stats() needs the crystal; call finalize_crystal() "
+                "or build_global_guard() first"
+            )
+        if X_pool is None:
+            pool = self._guard_pool()
+            if pool is None:
+                raise ValueError(
+                    "no buffered/reservoir rows available; the lattice has already "
+                    "consumed them -- pass an explicit pool: "
+                    "fit_residual_stats(X_pool, y_pool)"
+                )
+            X_pool, y_pool = pool
+        X_pool = np.asarray(X_pool, dtype=np.float64)
+        if X_pool.ndim == 1:
+            X_pool = X_pool.reshape(1, -1)
+        y_pool = np.asarray(y_pool, dtype=np.float64).reshape(-1)
+        if X_pool.ndim != 2 or X_pool.shape[0] == 0:
+            raise ValueError("X_pool must be a non-empty 2-D array")
+        if len(y_pool) != len(X_pool):
+            raise ValueError(
+                f"y_pool has {len(y_pool)} labels for {len(X_pool)} rows; they must match"
+            )
+        fX = self._pool_predict(X_pool).reshape(-1)
+        resid = y_pool - fX
+        med = float(np.median(resid))
+        mad = float(np.median(np.abs(resid - med))) + 1e-8
+        self._resid_mean, self._resid_std = med, mad
+        return {
+            "n_pool": int(len(X_pool)),
+            "resid_median": med,
+            "resid_mad": mad,
+        }
+
+    def build_global_guard(
+        self,
+        n_global: int = 150,
+        weight: float = 0.35,
+        X_pool=None,
+        y_pool=None,
+        n_lloyd: int = 6,
+        random_state: int | None = None,
+    ) -> dict:
+        """Replace the lowest-weight crystal rows with global K-Means medoids.
+
+        Root cause (validated live on PM2.5, 5 seeds, ``tools/proto_swap.py``):
+        the crystal's rows are ranked by Voronoi cell counts, so the exported
+        head-slice donor pool is dominated by the background the lattice
+        happened to keep -- a global model trained on the export loses to
+        plain K-Means on the SAME budget (measured: median all-RMSE 88.3
+        swap150 vs 90.0 kmeans, crit-RMSE 230 vs 236 -- the swap wins BOTH
+        metrics 5/5 seeds, and larger guards help ``all`` monotonically
+        without hurting ``crit``).
+
+        This is the library-side fix: swap the ``n_global`` lowest-weight
+        crystal rows for K-Means medoids of a representative pool (the
+        warm-up buffer + the bounded reservoir, or an explicit pool). Donors
+        are seeded and relaxed in the SAME standardized space the exported
+        crystal is consumed in -- NOT the distiller's internal RFF input
+        space (``dsketch50`` measured worse: the sketch metric distortion is
+        part of the root cause).
+
+        Donor weights are cell counts renormalised to mean one, damped by
+        ``weight`` (0 = pure background guard, 1 = as heavy as an average
+        crystal row), then multiplied by a residual-aware factor: donors the
+        crystal's own ridge map already predicts within the pool's robust
+        residual scale add little, so their weight is damped toward the
+        floor. The residual scale is fitted on the same pool
+        (``fit_residual_stats``); the crystal's rows are left untouched.
+
+        Parameters
+        ----------
+        n_global:
+            How many lowest-weight rows to replace (default 150; PM2.5
+            measured monotone ``all`` gains up to 150 without a ``crit`` cost).
+        weight:
+            Base weight of the donors relative to a mean crystal row.
+        X_pool, y_pool:
+            Optional explicit pool; default is everything the distiller still
+            holds (see ``_guard_pool``). Stream with
+            ``lattice_rebuild_interval > 0`` so the reservoir covers the whole
+            stream, or pass the training slice explicitly for a
+            batch-distilled crystal.
+        n_lloyd:
+            Lloyd relaxation steps after k-means++ seeding.
+        random_state:
+            Optional explicit seed; default reuses the distiller's RNG state.
+
+        Returns a report dict (swapped, pool size, weight diagnostics). The
+        crystal is mutated in place; call ``save_hologram`` to persist.
+        """
+        if self.crystal_X is None:
+            raise ValueError(
+                "build_global_guard() called before finalize_crystal(); "
+                "the crystal has no rows to guard"
+            )
+        n_global = int(n_global)
+        if n_global <= 0:
+            return {"swapped": 0, "n_pool": 0, "note": "n_global <= 0: no-op"}
+        weight = float(weight)
+        if not 0.0 <= weight <= 1.0:
+            raise ValueError(f"weight must be in [0, 1], got {weight}")
+        n_lloyd = int(n_lloyd)
+        if n_lloyd < 0:
+            raise ValueError(f"n_lloyd must be >= 0, got {n_lloyd}")
+        if X_pool is None:
+            pool = self._guard_pool()
+            if pool is None:
+                raise ValueError(
+                    "no buffered/reservoir rows available for the guard pool; "
+                    "pass X_pool/y_pool explicitly (e.g. the training slice)"
+                )
+            X_pool, y_pool = pool
+        X_pool = np.asarray(X_pool, dtype=np.float64)
+        if X_pool.ndim == 1:
+            X_pool = X_pool.reshape(1, -1)
+        y_pool = np.asarray(y_pool, dtype=np.float64).reshape(-1)
+        if X_pool.ndim != 2 or X_pool.shape[0] == 0:
+            raise ValueError("X_pool must be a non-empty 2-D array")
+        if len(y_pool) != len(X_pool):
+            raise ValueError(
+                f"y_pool has {len(y_pool)} labels for {len(X_pool)} rows; they must match"
+            )
+        if X_pool.shape[1] != self.crystal_X.shape[1]:
+            raise ValueError(
+                f"pool has {X_pool.shape[1]} features but the crystal stores "
+                f"{self.crystal_X.shape[1]}; pass raw-feature rows"
+            )
+
+        n_sw = min(n_global, len(X_pool))
+        rng = self.rng if random_state is None else np.random.default_rng(random_state)
+        rng_prev = self.rng
+        if random_state is not None:
+            self.rng = rng
+        try:
+            # Donors live in the crystal's standardized (raw-feature) space.
+            Z_pool = self._normalize_X(X_pool, update_state=False)
+            centers = self._seed_kmeans_pp(Z_pool, n_sw)
+            for _ in range(n_lloyd):
+                d_mat = cdist(Z_pool, centers, metric="sqeuclidean")
+                labels = np.argmin(d_mat, axis=1)
+                for c_i in range(len(centers)):
+                    mask = labels == c_i
+                    if np.any(mask):
+                        centers[c_i] = np.mean(Z_pool[mask], axis=0)
+            d_snap = cdist(centers, Z_pool, metric="sqeuclidean")
+            med_idx = np.argmin(d_snap, axis=1)
+            labels = np.argmin(cdist(Z_pool, centers, metric="sqeuclidean"), axis=1)
+        finally:
+            if random_state is not None:
+                self.rng = rng_prev
+        counts = np.bincount(labels, minlength=len(centers)).astype(np.float64) + 1.0
+        X_g = X_pool[med_idx].copy()
+        y_g = y_pool[med_idx].copy()
+
+        # Residual-aware donor scores against the crystal's own ridge map.
+        if self._resid_mean is None:
+            self.fit_residual_stats(X_pool, y_pool)
+        fX = self._pool_predict(X_g).reshape(-1)
+        resid_z = np.abs((y_g - fX) - self._resid_mean) / self._resid_std
+        zbar = float(np.mean(resid_z))
+        damp = 1.0 / (1.0 + zbar)
+        w_g = (counts / np.mean(counts)) * weight * damp
+
+        order = np.argsort(self.gamma_weights)[:n_sw]
+        old_w = self.gamma_weights[order].copy()
+        swapped_mask = old_w > w_g
+        self.crystal_X[order] = X_g
+        self.crystal_Y[order] = y_g
+        self.gamma_weights[order] = w_g
+        # crystal_U feeds _pool_predict's ridge map and the spectral passport
+        # diagnostics; the swapped rows' sketches must match their new rows.
+        _Zg, U_g = self._spectral_transform(X_g, update_state=False)
+        self.crystal_U[order] = U_g
+        return {
+            "swapped": int(n_sw),
+            "n_pool": int(len(X_pool)),
+            "weight": weight,
+            "resid_z_mean": zbar,
+            "damp": float(damp),
+            "n_low_weight_reordered": int(np.sum(swapped_mask)),
+            "min_old_weight": float(np.min(old_w)),
+            "guard_weight_mean": float(np.mean(w_g)),
+        }
 
     def partial_fit(self, X_batch: np.ndarray, y_batch: np.ndarray | None = None):
         """Absorb one streaming batch.
@@ -1142,6 +1389,24 @@ class HologramCrystalLoader:
             self.tau_n_windows = None
             self.tau_fa_rate = None
 
+        # Mean-shift radar calibration (v3.13.0): the combined radar adds a
+        # per-feature standardized mean-deviation term to the BW term and
+        # scores one fused threshold. Both thresholds are persisted so a
+        # deployment reloads bit-identically (like tau_calibrated). Legacy
+        # artifacts and uncalibrated loaders leave both None, in which case
+        # check_domain_shift(mean_shift=True) falls back to scoring the
+        # mean-shift term against the rank-scaled default threshold.
+        if "ms_tau_calibrated" in data.files:
+            self.ms_tau_calibrated = float(np.asarray(data["ms_tau_calibrated"]).reshape(-1)[0])
+            self.ms_tau_window = int(np.asarray(data["ms_tau_window"]).reshape(-1)[0])
+            self.ms_tau_n_windows = int(np.asarray(data["ms_tau_n_windows"]).reshape(-1)[0])
+            self.ms_tau_fa_rate = float(np.asarray(data["ms_tau_fa_rate"]).reshape(-1)[0])
+        else:
+            self.ms_tau_calibrated = None
+            self.ms_tau_window = None
+            self.ms_tau_n_windows = None
+            self.ms_tau_fa_rate = None
+
         self._prev_row = None  # last raw row of the previous streaming radar call
 
         if "Omega" in data.files:
@@ -1182,34 +1447,42 @@ class HologramCrystalLoader:
         a measured value, and training on the placeholder would bias the
         model. Crystals without placeholder rows are unaffected, so this
         changes no published benchmark number.
+
+        Since v3.12.1 the drop happens FIRST and the ``budget_points`` slice
+        is spent on the remaining LABELLED rows, so a requested budget is
+        always honoured (reproduced in ``tools/hunt/round2_probe_b``: 30 of 60
+        requested rows were healed placeholders and got dropped, returning
+        fewer rows than asked). Only if fewer labelled rows exist than the
+        budget can the slice come back short.
         """
         w_all = self._select_weights(weighting)
         X, y, w = self.X, self.y, w_all
-        labelled = self.y_labelled
-        if budget_points is not None and budget_points < len(X):
+        if drop_unlabelled and not np.all(self.y_labelled):
+            keep = self.y_labelled
+            X, y, w = X[keep], y[keep], w[keep]
+        if budget_points is not None:
             if int(budget_points) < 1:
                 raise ValueError(f"budget_points must be >= 1, got {budget_points}")
-            # v3.11.1: the phase-peak band is admitted FIRST, then the largest
-            # background cells. Crystal rows are stored sorted by cell count,
-            # so a plain head slice spent the whole budget on background and
-            # starved the rare regime the crystal exists to preserve
-            # (measured on a 200-medoid crystal with a 60-row peak band: a
-            # budget of 100 kept only 4 peak rows).
-            peak = self._peak_rank_idx(len(self.y), float(self.high_band_ratio))
-            chosen = [int(i) for i in peak[:budget_points]]
-            if len(chosen) < budget_points:
-                taken = set(chosen)
-                for i in range(len(X)):
-                    if i not in taken:
-                        chosen.append(i)
-                        if len(chosen) == budget_points:
-                            break
-            idx = np.asarray(chosen, dtype=np.int64)
-            X, y, w = X[idx], y[idx], w[idx]
-            labelled = labelled[idx]
-        if drop_unlabelled and not np.all(labelled):
-            keep = labelled
-            X, y, w = X[keep], y[keep], w[keep]
+            if budget_points < len(X):
+                # v3.11.1: the phase-peak band is admitted FIRST, then the
+                # largest background cells. Crystal rows are stored sorted by
+                # cell count, so a plain head slice spent the whole budget on
+                # background and starved the rare regime the crystal exists to
+                # preserve (measured on a 200-medoid crystal with a 60-row
+                # peak band: a budget of 100 kept only 4 peak rows).
+                # v3.12.1: run this on the LABELLED row space so the budget
+                # is spent where it helps (probe B).
+                peak = self._peak_rank_idx(len(X), float(self.high_band_ratio), y=y)
+                chosen = [int(i) for i in peak[:budget_points]]
+                if len(chosen) < budget_points:
+                    taken = set(chosen)
+                    for i in range(len(X)):
+                        if i not in taken:
+                            chosen.append(i)
+                            if len(chosen) == budget_points:
+                                break
+                idx = np.asarray(chosen, dtype=np.int64)
+                X, y, w = X[idx], y[idx], w[idx]
         if len(X) != len(self.X):
             w = w.copy()
             w /= np.mean(w)
@@ -1412,12 +1685,109 @@ class HologramCrystalLoader:
         rank_scale = float(np.sqrt(len(self.eigvals) / 32.0))
         return float(BW_ALERT_THRESHOLD * sample_scale * rank_scale)
 
+    def _calibrated_threshold_ms(self, n_batch: int, adaptive_threshold: bool = True) -> float:
+        """Threshold for the COMBINED (BW + mean-shift) score (v3.13.0).
+
+        Mirrors :meth:`_calibrated_threshold`'s finite-sample 1/sqrt(B)
+        scaling on the combined score, using the ``ms_tau_*`` calibration
+        fields when present, else the same default logic.
+        """
+        if not adaptive_threshold:
+            return float(BW_ALERT_THRESHOLD)
+        if self.ms_tau_calibrated is not None:
+            b_eff = max(int(n_batch), 16)
+            w_ref = max(int(self.ms_tau_window), 16)
+            return float(self.ms_tau_calibrated) * max(1.0, float(np.sqrt(float(w_ref) / b_eff)))
+        b_eff = max(int(n_batch), 16)
+        sample_scale = max(1.0, float(np.sqrt(1024.0 / b_eff)))
+        rank_scale = float(np.sqrt(len(self.eigvals) / 32.0))
+        # The combined score sums the BW distance (rank-scaled) and the
+        # mean-shift z-score (no rank dependence), so its default threshold
+        # is the rank-scaled BW constant -- the mean-shift term rides along.
+        return float(BW_ALERT_THRESHOLD * sample_scale * rank_scale)
+
+    def _effective_stream(self, X_stream, remember_prev_row=False):
+        """Raw effective feature matrix for the mean-shift term (v3.13.0).
+
+        Mirrors :meth:`_normalize_stream`'s delta augmentation WITHOUT the
+        per-row normalization/clip, so the window mean is computed on the raw
+        (x, or x||dx for delta crystals) features. For non-delta crystals this
+        is the stream as-is; the width must equal ``len(self.X_mean)``.
+        """
+        X = np.asarray(X_stream, dtype=np.float64)
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+        if X.ndim != 2:
+            raise ValueError(f"stream window must be 2-D, got shape {X.shape}")
+        if not np.isfinite(X).all():
+            raise ValueError("stream window contains NaN/Inf; the mean-shift term "
+                             "projects raw rows, so non-finite values cannot be scored")
+        expected = len(self.X_mean)
+        if self.include_deltas:
+            d_raw = expected // 2
+            if X.shape[1] == d_raw:
+                dX = np.zeros_like(X, dtype=np.float64)
+                if len(X) > 1:
+                    dX[1:] = X[1:] - X[:-1]
+                if remember_prev_row and self._prev_row is not None:
+                    dX[0] = X[0] - self._prev_row
+                if remember_prev_row and len(X) > 0:
+                    self._prev_row = np.asarray(X[-1], dtype=np.float64).copy()
+                return np.hstack([X, dX])
+            elif X.shape[1] == expected:
+                return X
+            else:
+                raise ValueError(
+                    f"delta crystal expects {d_raw} raw features (or {expected} "
+                    f"pre-augmented [x || dx] features), got {X.shape[1]}"
+                )
+        else:
+            if X.shape[1] != expected:
+                raise ValueError(
+                    f"stream window has {X.shape[1]} features but this crystal "
+                    f"expects {expected} (non-delta crystal; pass include_deltas=True "
+                    "at distillation time for delta streams)"
+                )
+            return X
+
+    def _mean_shift_distance(self, X_stream, distiller_ref=None, remember_prev_row=False):
+        """Max per-feature standardized mean deviation of one window (v3.13.0).
+
+        Leak signatures on MetroPT-3 appear as mean shifts, which the
+        Bures-Wasserstein radar (second-moment only) is blind to. This term
+        z-scores the window mean against the crystal's OWN medoid cloud
+        (``self.X``: the real stored medoids spanning the whole learn window)
+        and takes the max over features, so the most-deviated sensor drives
+        the alert. Self-contained: uses the artifact's own rows, no original
+        dataset needed.
+
+        The persisted ``X_mean`` / ``X_std`` are deliberately NOT used here:
+        they are first-batch running statistics that exist to normalize the
+        RFF input. A feature that happens to be constant in the first batch
+        (MetroPT-3 ``LPS``: std ~1e-8 over the first 4000 minutes) makes the
+        z-score explode to ~3.9e7 on quantization noise, which drowns the
+        leak signal (measured: the calibrated combined tau sat at 3.86e7 and
+        the arm fired on noise). The medoid cloud spans the entire learn
+        window, so its per-feature std is the deployment-scale denominator,
+        and it travels with ``heal_domain_shift`` (injected medoids shift the
+        reference population with it).
+        """
+        X_eff = self._effective_stream(X_stream, remember_prev_row=remember_prev_row)
+        ref = self.X
+        mu = ref.mean(axis=0)
+        sd = ref.std(axis=0)
+        ok = sd > 1e-9
+        z = np.abs(X_eff.mean(axis=0) - mu) / np.where(ok, sd, 1.0)
+        val = float(z[ok].max()) if ok.any() else 0.0
+        return val, len(X_eff)
+
     def check_domain_shift(
         self,
         X_new_stream: np.ndarray,
         distiller_ref=None,
         adaptive_threshold: bool = True,
         streaming: bool = False,
+        mean_shift: bool = False,
     ) -> dict:
         """Compare a new data stream against the spectral passport.
 
@@ -1437,6 +1807,13 @@ class HologramCrystalLoader:
         ``calibrate_threshold()`` has been run (``threshold_source:
         "calibrated"``), otherwise the rank-scaled default constant
         (``threshold_source: "default"``).
+
+        With ``mean_shift=True`` (v3.13.0) the dict also returns
+        ``mean_shift_distance`` and ``combined_distance`` (= ``bw_distance`` +
+        ``mean_shift_distance``): the mean-shift term catches the mean-shift
+        signatures (leak/phase-change) the BW term misses, so the combined
+        score is what a deployment device should alarm on. Default ``False``
+        keeps the existing behaviour bit-identical.
         """
         t0 = time.perf_counter()
         bw_dist, n_rows = self._bw_distance(
@@ -1445,13 +1822,28 @@ class HologramCrystalLoader:
         thr = self._calibrated_threshold(n_rows, adaptive_threshold=adaptive_threshold)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
-        return {
+        res = {
             "bw_distance": bw_dist,
             "threshold": thr,
             "threshold_source": "calibrated" if self.tau_calibrated is not None else "default",
             "latency_ms": latency_ms,
-            "is_shifted": bw_dist > thr,
         }
+        if mean_shift:
+            ms, _ = self._mean_shift_distance(
+                X_new_stream, distiller_ref=distiller_ref, remember_prev_row=streaming
+            )
+            combined = float(bw_dist + ms)
+            ms_thr = self._calibrated_threshold_ms(n_rows, adaptive_threshold=adaptive_threshold)
+            res["mean_shift_distance"] = ms
+            res["combined_distance"] = combined
+            res["combined_threshold"] = float(ms_thr)
+            res["combined_threshold_source"] = (
+                "calibrated" if self.ms_tau_calibrated is not None else "default"
+            )
+            res["is_shifted"] = combined > ms_thr
+        else:
+            res["is_shifted"] = bw_dist > thr
+        return res
 
     def _bw_distance(self, X_stream, distiller_ref=None, remember_prev_row=False):
         """BW distance between the passport and one window: ``(distance, rows)``.
@@ -1546,6 +1938,60 @@ class HologramCrystalLoader:
             "fa_rate": float(fa_rate),
             "dist_median": float(np.median(dists)),
             "dist_max": float(np.max(dists)),
+        }
+
+    def calibrate_threshold_ms(self, X_ref, *, window: int, fa_rate: float = 0.01) -> dict:
+        """Calibrate the combined radar's fused threshold on healthy windows (v3.13.0).
+
+        The combined radar alarms on ``bw_distance + mean_shift_distance``.
+        Since the mean-shift term is a z-score that follows the same
+        "larger window -> smaller spread" scaling as the BW distance, the
+        fused score needs its OWN threshold calibrated the same way
+        (``calibrate_threshold``) on HEALTHY windows from the deployment
+        stream, over the same non-overlapping windows. Run this after
+        ``calibrate_threshold`` -- the two thresholds share the window size
+        and are persisted (and invalidated) together by ``save()`` /
+        ``heal_domain_shift``.
+
+        Returns a report dict with the fused ``tau``; ``check_domain_shift``
+        picks it up automatically and ``is_shifted`` then reflects the
+        combined score.
+        """
+        X_ref = np.asarray(X_ref, dtype=np.float64)
+        if X_ref.ndim == 1:
+            X_ref = X_ref.reshape(1, -1)
+        if X_ref.ndim != 2:
+            raise ValueError(f"X_ref must be 2-D (rows, features), got shape {X_ref.shape}")
+        window = int(window)
+        if window < 8:
+            raise ValueError(f"window must be >= 8 rows, got {window}")
+        if not 0.0 < float(fa_rate) < 0.5:
+            raise ValueError(f"fa_rate must be in (0, 0.5), got {fa_rate}")
+        n_windows = len(X_ref) // window
+        if n_windows < 10:
+            raise ValueError(
+                f"a {1.0 - float(fa_rate):.0%} quantile needs at least 10 windows of "
+                f"{window} rows; got {n_windows} from {len(X_ref)} rows -- provide at "
+                f"least {10 * window} healthy rows"
+            )
+        combined = np.empty(n_windows, dtype=np.float64)
+        for w_i in range(n_windows):
+            sl = X_ref[w_i * window:(w_i + 1) * window]
+            bw, _ = self._bw_distance(sl)
+            ms, _ = self._mean_shift_distance(sl)
+            combined[w_i] = bw + ms
+        tau = float(np.quantile(combined, 1.0 - float(fa_rate)))
+        self.ms_tau_calibrated = tau
+        self.ms_tau_window = window
+        self.ms_tau_n_windows = n_windows
+        self.ms_tau_fa_rate = float(fa_rate)
+        return {
+            "tau": tau,
+            "window": window,
+            "n_windows": n_windows,
+            "fa_rate": float(fa_rate),
+            "combined_median": float(np.median(combined)),
+            "combined_max": float(np.max(combined)),
         }
 
     def heal_domain_shift(
@@ -1834,6 +2280,12 @@ class HologramCrystalLoader:
         self.tau_window = None
         self.tau_n_windows = None
         self.tau_fa_rate = None
+        # v3.13.0: the combined-radar calibration is invalidated by the same
+        # passport move; clear it together with the BW threshold.
+        self.ms_tau_calibrated = None
+        self.ms_tau_window = None
+        self.ms_tau_n_windows = None
+        self.ms_tau_fa_rate = None
 
         after = self.check_domain_shift(X_win, distiller_ref=distiller_ref)
         return {
@@ -1884,6 +2336,13 @@ class HologramCrystalLoader:
             payload["tau_window"] = np.array([int(self.tau_window)], dtype=np.int64)
             payload["tau_n_windows"] = np.array([int(self.tau_n_windows)], dtype=np.int64)
             payload["tau_fa_rate"] = np.array([float(self.tau_fa_rate)], dtype=np.float64)
+        if getattr(self, "ms_tau_calibrated", None) is not None:
+            # v3.13.0: the combined-radar fused-threshold calibration travels
+            # with the crystal the same way.
+            payload["ms_tau_calibrated"] = np.array([float(self.ms_tau_calibrated)], dtype=np.float64)
+            payload["ms_tau_window"] = np.array([int(self.ms_tau_window)], dtype=np.int64)
+            payload["ms_tau_n_windows"] = np.array([int(self.ms_tau_n_windows)], dtype=np.int64)
+            payload["ms_tau_fa_rate"] = np.array([float(self.ms_tau_fa_rate)], dtype=np.float64)
         if self.Omega is not None and self.phase is not None:
             payload["Omega"] = self.Omega.astype(np.float32)
             payload["phase"] = self.phase.astype(np.float32)
@@ -1905,6 +2364,7 @@ class HologramCrystalLoader:
             "tail": self.tail,
             "include_deltas": bool(self.include_deltas),
             "has_projector": bool(self.Omega is not None),
+            "mean_shift_calibrated": bool(getattr(self, "ms_tau_calibrated", None) is not None),
             "passport_reference": self.passport_reference,
             "n_unlabelled": int(np.sum(~self.y_labelled)),
             "y_min": float(np.min(self.y)),

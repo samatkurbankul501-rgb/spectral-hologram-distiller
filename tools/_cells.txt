@@ -1,0 +1,12 @@
+13:    (e.g. high-Tc superconductors) occupy their own cells and cannot be absorbed
+14:    by the low-temperature background. Cell representatives are *real* medoids,
+19:    the Voronoi cell mass acts as the importance-weighting prior, softened by
+45:     Port of the reference Colab implementation (cell 9 of ``Untitled22.ipynb``),
+53:         Fraction of cells reserved for the phase-peak band (default 0.26).
+107:         1.0 uses raw cell volumes.
+118:         ``auto_band_ratio=True`` then allocates cells in proportion to the
+128:         with zero dedicated cells: measured on a 60k-row synthetic stream, a
+468:         Voronoi cells. The reservoir's phase scores are re-used as-is: they
+865:             # from the reservoir so late-arriving regimes get their own cells.
+1203:                 # largest background cells. Crystal rows are stored sorted by
+1204:                 # cell count, so a plain head slice spent the whole budget on

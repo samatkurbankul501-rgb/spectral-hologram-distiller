@@ -1,0 +1,99 @@
+9:    the top ``tail_quantile`` percentile of ``residual_ratio + 2 * y_z^2`` as
+52:     high_band_ratio : float
+58:     tail_quantile : float
+76:     tail : str
+77:         Which tail of the target distribution the phase-peak trigger protects
+118:         ``auto_band_ratio=True`` then allocates cells in proportion to the
+165:     def __init__(
+168:         high_band_ratio: float = 0.26,
+171:         tail_quantile: float = 84.0,
+176:         tail: str = "high",
+187:         auto_band_ratio: bool = False,
+192:         if tail not in ("high", "low", "both"):
+193:             raise ValueError(f"tail must be 'high', 'low' or 'both', got {tail!r}")
+202:         if not 0.0 <= float(high_band_ratio) <= 1.0:
+204:                 f"high_band_ratio must be within [0, 1], got {high_band_ratio}"
+209:         self.M_high = int(round(crystal_size * high_band_ratio))
+212:         self.high_band_ratio = float(high_band_ratio)
+216:         self.tail_q = tail_quantile
+220:         self.tail = tail
+230:         if self.critical_threshold is not None and tail == "low":
+232:             # UPPER side of the target), while tail="low" makes the loader
+239:                 "threshold) but tail='low' serves the LOWEST medoids; use "
+240:                 "tail='high' (or 'both') together with critical_threshold, or "
+243:         self.auto_band_ratio = bool(auto_band_ratio)
+302:     def _init_projector(self, X_batch: np.ndarray, y_batch: np.ndarray):
+320:     def _augment_deltas(self, X_batch: np.ndarray, update_state: bool = False) -> np.ndarray:
+332:     def _normalize_X(self, X_batch: np.ndarray, update_state: bool = False) -> np.ndarray:
+336:     def _make_phase_coords(self, Z_batch: np.ndarray, y_batch: np.ndarray) -> np.ndarray:
+341:     def _spectral_transform(self, X_batch: np.ndarray, update_state: bool = False) -> tuple:
+347:     def _seed_kmeans_pp(self, ZY_cand: np.ndarray, n_select: int) -> np.ndarray:
+350:             # Zero-budget band (e.g. high_band_ratio=0 or 1): seeding nothing
+379:     def _build_phase_manifold_lattice(self):
+388:         thr = np.percentile(sc_all, self.tail_q)
+394:             if self.auto_band_ratio:
+463:     def _rebuild_lattice_from_reservoir(self):
+494:     def _reservoir_add(self, Z_B, X_B, y_B, U_B, score_B):
+563:                     # carries the long-tail coverage.
+581:     def _res_peak_replace(self, j, z_row, x_row, y_row, u_row, s_row):
+602:     def partial_fit(self, X_batch: np.ndarray, y_batch: np.ndarray | None = None):
+783:         tail_eff = "high" if y_is_synthetic else self.tail
+784:         if tail_eff == "high":
+786:         elif tail_eff == "low":
+802:             thr_bg = float(np.percentile(phase_score, self.tail_q))
+837:                     # Stream the not-yet-buffered tail of the batch through the
+895:     def finalize_crystal(self, fista_steps: int = 250) -> float:
+958:     def save_hologram(
+1023:             tail=np.array(self.tail),
+1025:             high_band_ratio=np.array([float(self.high_band_ratio)], dtype=np.float64),
+1055:     def __init__(self, filepath: str = "hologram.npz", include_deltas: bool | None = None):
+1082:         if "tail" in data.files:
+1083:             self.tail = str(np.asarray(data["tail"]).item())
+1085:             self.tail = "high"  # legacy artifacts predate the tail field
+1086:         if self.tail not in ("high", "low", "both"):
+1087:             self.tail = "high"
+1107:         if "high_band_ratio" in data.files:
+1108:             br = float(np.asarray(data["high_band_ratio"]).reshape(-1)[0])
+1109:             self.high_band_ratio = br if 0.0 < br < 1.0 else 0.26
+1111:             self.high_band_ratio = 0.26
+1157:     def _select_weights(self, weighting: str) -> np.ndarray:
+1165:     def get_training_data(
+1210:                 peak = self._peak_rank_idx(len(X), float(self.high_band_ratio), y=y)
+1226:     def get_phase_peak_slice(
+1228:         high_band_ratio: float | None = None,
+1240:         ``high_band_ratio`` fraction of medoids that are most extreme in the
+1241:         crystal's ``tail`` direction:
+1242:         the top by ``y`` for ``tail="high"``, the bottom for ``tail="low"``, and
+1243:         the most extreme relative to the median for ``tail="both"``. Rows are
+1251:         ``high_band_ratio`` defaults to the crystal's persisted band ratio
+1258:         if high_band_ratio is None:
+1259:             high_band_ratio = float(self.high_band_ratio)
+1263:                 idx = self._peak_rank_idx(len(self.y), high_band_ratio)
+1267:             idx = self._peak_rank_idx(len(self.y), high_band_ratio)
+1274:     def _peak_rank_idx(self, n_medoids: int, high_band_ratio: float, y=None) -> np.ndarray:
+1282:         ``y``). v3.11.1 let ``tail="both"`` re-rank that band by
+1286:         Without a threshold, ``tail="high"`` returns the ``k_top`` largest-y
+1295:         k_top = max(1, int(round(n_medoids * high_band_ratio)))
+1304:             # through to the tail-based ranking rather than return nothing.
+1305:         if self.tail == "high":
+1307:         if self.tail == "low":
+1312:     def _normalize_stream(
+1365:     def _prepare_stream(
+1393:     def _calibrated_threshold(self, n_batch: int, adaptive_threshold: bool = True) -> float:
+1423:     def check_domain_shift(
+1464:     def _bw_distance(self, X_stream, distiller_ref=None, remember_prev_row=False):
+1493:     def calibrate_threshold(self, X_ref, *, window: int, fa_rate: float = 0.01) -> dict:
+1559:     def heal_domain_shift(
+1584:         injected medoids; the protected band follows the crystal's ``tail``
+1660:             # serve -- the tail direction, or y >= critical_threshold for a
+1661:             # threshold-distilled crystal. The inline tail logic protected
+1662:             # low-side medoids for a tail="both" + critical_threshold crystal
+1664:             protected_pre[self._peak_rank_idx(n_old_now, self.high_band_ratio, y=self.y[:n_old_now])] = True
+1780:                 # serve (tail direction, or the critical threshold's upper
+1781:                 # side), sized by the persisted high_band_ratio (v3.12.0).
+1782:                 peak_old_idx = self._peak_rank_idx(n_old, self.high_band_ratio, y=self.y[:n_old])
+1863:     def save(self, filepath: str | None = None) -> float:
+1878:             tail=np.array(self.tail),
+1880:             high_band_ratio=np.array([float(self.high_band_ratio)], dtype=np.float64),
+1901:     def summary(self) -> dict:
+1913:             "tail": self.tail,

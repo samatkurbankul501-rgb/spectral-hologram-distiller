@@ -1,0 +1,32 @@
+82:         synthetic novelty coordinate is high spectral leverage by
+116:         If set (supervised mode), the phase-peak band is defined by
+266:         self.unsupervised_mode = False
+267:         self._mode = None  # "supervised" | "label_free", locked by the first non-empty batch
+605:         Supports both supervised streaming (``y_batch`` provided, shape ``(B,)``
+606:         or ``(B, 1)``) and label-free / unsupervised sensor streaming
+610:         and uses it as a synthetic novelty response on the phase manifold
+676:         mode = "label_free" if y_batch is None else "supervised"
+681:                 "partial_fit() cannot switch between supervised (y_batch provided) and "
+690:         y_is_synthetic = False
+693:             self.unsupervised_mode = True
+694:             y_is_synthetic = True
+783:         tail_eff = "high" if y_is_synthetic else self.tail
+895:     def finalize_crystal(self, fista_steps: int = 250) -> float:
+1031:             y_labelled=np.ones(len(self.crystal_Y), dtype=bool),
+1069:         if "y_labelled" in data.files:
+1070:             self.y_labelled = np.asarray(data["y_labelled"], dtype=bool).reshape(-1)
+1071:             if len(self.y_labelled) != len(self.y):
+1073:                     f"artifact declares y_labelled of length {len(self.y_labelled)} "
+1077:             self.y_labelled = np.ones(len(self.y), dtype=bool)
+1078:         self._has_real_targets = bool(np.any(self.y_labelled))
+1079:         self._target_placeholder = float(np.median(self.y[self.y_labelled])) if self._has_real_targets else 0.0
+1195:         if drop_unlabelled and not np.all(self.y_labelled):
+1196:             keep = self.y_labelled
+1738:             # Unsupervised fallback: spectral novelty score against current passport.
+1744:             # in [84.9, 113.0] next to novelty scores in [0.66, 0.91]), which
+1748:             # its column already holds the synthetic novelty coordinate and the
+1767:         self.y_labelled = np.concatenate(
+1768:             [self.y_labelled, np.asarray(labelled_patch, dtype=bool)]
+1808:                 self.y_labelled = self.y_labelled[keep_mask]
+1882:             y_labelled=self.y_labelled.astype(bool),
+1917:             "n_unlabelled": int(np.sum(~self.y_labelled)),

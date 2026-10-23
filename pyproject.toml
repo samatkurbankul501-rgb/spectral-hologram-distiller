@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spectral-hologram-distiller"
-version = "3.12.0"
+version = "3.12.1"
 description = "Zero-GPU streaming dataset distillation with phase-manifold Voronoi medoids and a 16-bit spectral-passport OOD radar."
 readme = "README.md"
 requires-python = ">=3.10"

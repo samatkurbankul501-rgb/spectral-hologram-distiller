@@ -196,6 +196,12 @@ def main():
 
     res = out["results"]["fd001"]
     res.setdefault("records", [])
+    expected_arms = ([f"shd_r{r}" for r in ratios] + [f"shdu_r{r}" for r in ratios]
+                     + ["random", "kmeans", "kt", "skt"])
+    # A seed is done only when every expected arm is present: adding the
+    # uniform-weight arms must re-run seeds distilled before they existed.
+    res["records"] = [r for r in res["records"]
+                      if all(a in r for a in expected_arms)]
     done = {r["seed"] for r in res["records"]}
     res.update({"oracle": oracle, "n_test_engines": int(len(y_te)),
                 "n_test_crit": int(np.sum(crit)), "partial": True})
@@ -211,6 +217,16 @@ def main():
             rec[f"shd_r{ratio}"] = evaluate(Xc, yc, wc, scaler, args.model_seed,
                                             X_te, Z_te, y_te, crit, rbf_gamma)
             rec[f"shd_r{ratio}"]["rare_captured"] = n_rare
+            # Same crystal, uniform weights. The round-3 probe
+            # (tools/hunt/round3_probes.py) measured that the gamma weights
+            # de-weight the critical band as the band grows (median
+            # w(low)/w(bg): 0.74 at br=0.26 -> 0.32 at br=0.65), so the
+            # §4 gamma/uniform trade-off is band-ratio dependent and the
+            # canonical bench records both weightings on identical crystals.
+            rec[f"shdu_r{ratio}"] = evaluate(Xc, yc, np.ones(len(yc)), scaler,
+                                             args.model_seed, X_te, Z_te, y_te,
+                                             crit, rbf_gamma)
+            rec[f"shdu_r{ratio}"]["rare_captured"] = n_rare
 
         Xc, yc, wc = build_random(X_tr, y_tr, seed, args.m)
         rec["random"] = evaluate(Xc, yc, wc, scaler, args.model_seed,
@@ -234,16 +250,18 @@ def main():
         save(args.output, out)
         print(f"[fd001] seed {seed:2d}: r26 krr_crit={rec['shd_r0.26']['krr_rmse_crit']:.2f} "
               f"r50={rec['shd_r0.5']['krr_rmse_crit']:.2f} r65={rec['shd_r0.65']['krr_rmse_crit']:.2f} "
+              f"u65={rec['shdu_r0.65']['krr_rmse_crit']:.2f} "
               f"| kt={rec['kt']['krr_rmse_crit']:.2f} skt={rec['skt']['krr_rmse_crit']:.2f} "
               f"km={rec['kmeans']['krr_rmse_crit']:.2f} | rare 26/50/65="
               f"{rec['shd_r0.26']['rare_captured']}/{rec['shd_r0.5']['rare_captured']}/"
               f"{rec['shd_r0.65']['rare_captured']} ({time.perf_counter() - t_s:.1f}s)", flush=True)
 
-    # Paired Wilcoxon of each SHD arm vs each baseline, canonical structure,
-    # plus per-arm wins vs the oracle.
+    # Paired Wilcoxon of each SHD arm (gamma and uniform) vs each baseline,
+    # canonical structure, plus per-arm wins vs the oracle.
     records = res["records"]
+    stat_arms = shd_arms + [f"shdu_r{r}" for r in ratios]
     tests = {}
-    for arm in shd_arms:
+    for arm in stat_arms:
         for metric in METRICS:
             for pair in ["random", "kmeans", "kt", "skt"]:
                 a = np.array([r[arm][metric] for r in records], dtype=np.float64)
@@ -261,7 +279,7 @@ def main():
                 }
     res["wilcoxon"] = tests
     res["vs_oracle"] = {}
-    for arm in shd_arms:
+    for arm in stat_arms:
         vo = {}
         for metric in ["krr_rmse_crit", "krr_rmse_all", "gbm_rmse_crit", "gbm_rmse_all"]:
             a = np.array([r[arm][metric] for r in records], dtype=np.float64)
@@ -274,7 +292,7 @@ def main():
     save(args.output, out)
     print(f"[fd001] done in {res['elapsed_sec']:.1f}s (partial={res['partial']})", flush=True)
 
-    for arm in shd_arms:
+    for arm in stat_arms:
         t = tests[f"{arm}_vs_kt_krr_rmse_crit"]
         tk = tests[f"{arm}_vs_kmeans_krr_rmse_crit"]
         ts = tests[f"{arm}_vs_skt_krr_rmse_crit"]

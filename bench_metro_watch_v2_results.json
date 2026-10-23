@@ -94,9 +94,9 @@
      "detected": false
     }
    ],
-   "learn_sec": 4.7,
-   "crystal_kb": 54.8,
-   "watch_scan_sec": 15.3
+   "learn_sec": 6.8,
+   "crystal_kb": 55.4,
+   "watch_scan_sec": 47.9
   },
   {
    "arm": "z_detrend",
@@ -187,7 +187,7 @@
      "detected": false
     }
    ],
-   "fit_sec": 0.6
+   "fit_sec": 1.1
   },
   {
    "arm": "shd_raw",
@@ -233,6 +233,52 @@
      "detected": false
     }
    ]
+  },
+  {
+   "arm": "shd_radar",
+   "detrended": true,
+   "tau": 11.549324251856952,
+   "calibration_episodes": 0,
+   "calibration_alert_fraction": 0.0,
+   "calibration_windows": 994,
+   "watch_windows": 4192,
+   "watch_episodes": 13,
+   "unmatched_episodes": 2,
+   "unmatched_fa_per_month": 0.697,
+   "unmatched_fa_per_month_calendar": 0.531,
+   "watch_exposure_months": 2.869,
+   "watch_calendar_months": 3.767,
+   "incidents": [
+    {
+     "name": "Air leak #1",
+     "start": "2020-04-18 00:00",
+     "first_alert": "2020-04-12T12:43",
+     "lead_hours": 131.28333333333333,
+     "detected": true
+    },
+    {
+     "name": "Air leak #2",
+     "start": "2020-05-29 23:30",
+     "first_alert": "2020-05-13T14:06",
+     "lead_hours": 393.4,
+     "detected": true
+    },
+    {
+     "name": "Air leak #3",
+     "start": "2020-06-05 10:00",
+     "first_alert": "2020-05-18T05:39",
+     "lead_hours": 436.35,
+     "detected": true
+    },
+    {
+     "name": "Air leak #4",
+     "start": "2020-07-15 14:30",
+     "first_alert": "2020-07-15T18:23",
+     "lead_hours": 0.0,
+     "detected": true
+    }
+   ],
+   "radar": "bw_distance + mean_shift_distance (v3.13.0)"
   }
  ],
  "incidents_truth": [
@@ -265,5 +311,5 @@
    "severity": "High stress"
   }
  ],
- "elapsed_sec": 140.6
+ "elapsed_sec": 247.7
 }
