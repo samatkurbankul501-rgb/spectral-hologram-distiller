@@ -4,9 +4,17 @@ from .distiller import (
     SpectralHologramDistiller,
 )
 from .bank import DomainBank
+from .portfolio import CoresetPortfolio, ConformalCrystal
 
 #: Single source of truth lives in ``shd.distiller.SHD_VERSION``; it is
 #: recorded into every .hologram.npz artifact at save time (v3.13.1).
 __version__ = SHD_VERSION
 
-__all__ = ["SpectralHologramDistiller", "HologramCrystalLoader", "DomainBank", "SHD_VERSION"]
+__all__ = [
+    "SpectralHologramDistiller",
+    "HologramCrystalLoader",
+    "DomainBank",
+    "CoresetPortfolio",
+    "ConformalCrystal",
+    "SHD_VERSION",
+]

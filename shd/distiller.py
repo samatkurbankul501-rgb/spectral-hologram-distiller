@@ -42,7 +42,7 @@ BW_ALERT_THRESHOLD = 0.085
 #: Package version, single source of truth (re-exported as ``shd.__version__``).
 #: Recorded into every .hologram.npz at save time so a crystal can always tell
 #: which build distilled it.
-SHD_VERSION = "3.13.2"
+SHD_VERSION = "3.14.0"
 
 
 class SpectralHologramDistiller:

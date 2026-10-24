@@ -5,7 +5,37 @@
 пропуск события дороже средней ошибки. Первая итерация дала рабочий
 кандидат: **SHD-C (critical-aware) + опциональный global guard / KT-портфель**.
 
+## Итерация v3.14.0: портфель OOF-стекинга + alarm-zone конформаль (2026-10-25)
+
+Закрыты две слабости карты: (1) «глобально уступает SKT/KT» и (4) «нет
+неопределённости». Слабости (2) Scania-logit и (3) дефолты — не тронуты.
+
 ## TL;DR
+
+- **CoresetPortfolio (v3.14.0, 20 seeds × 3 датасета, Wilcoxon):**
+  SC crit **17.95** vs 18.81 (SHD-C) / 23.26 (KT) / 21.19 (SKT) / 19.57
+  (hard-gate), глобаль 15.41 = SHD-C (p=0.52), лучше всех остальных
+  (p≤1e-3); PM2.5 **Pareto-лучший**: crit **227.27** + глобаль **86.67**
+  (KT 245.74/89.89, SHD-C 231.01/95.08, hard-gate 238.36/90.63) — обе
+  метрики значимо (p≤1e-3); реактор — волосок хуже по crit (3.45 vs 3.44,
+  p=0.03), глобаль равна (0.98), остальных бьёт (p<1e-4). Soft OOF-гейт
+  читает ОБА предсказания и бьёт пороговый hard-gate на всех трёх
+  датасетах — схема v3.13 (gate на прокси) была принципиально слабее.
+- **ConformalCrystal (v3.14.0):** split-conformal интервалы вокруг любой
+  модели; калибровать на СРЕЗЕ ПОТОКА, не на строках кристалла
+  (y-стратификация ломает обменность: crit-покрытие 0.23 при цели 0.90 —
+  измерено). `mondrian="alarm_zone"`: группа `pred >= threshold − delta`,
+  delta автоподбором под `zone_fraction` (0.03 дефолт; 0.10 ловит 116/122
+  истинных пиков реактора при in-zone покрытии 0.946; 0.20 — дрейф 0.918:
+  шире ≠ лучше). Двусторонние квантили SIGNED-остатка в группе дают точное
+  1−α внутри зоны даже при систематическом занижении пиков моделью
+  (регрессия к среднему). Своп |resid|/signed (маргинал 0.859) и ранг
+  1−α+α/2 (0.859/0.906) — исправленные дефекты первых версий.
+- **Портфель на реакторе — не дефолт:** где крит-эксперт уже достаточно
+  хорош (реактор), портфель лишь не мешает (p=0.03 crit); рекомендация
+  opt-in, дефолт — одиночный SHD-C.
+
+## TL;DR (итерация 2026-10-17)
 
 - **SHD-C (critical-aware band)** — новое режим: если известен порог
   `critical_threshold`, фазовая полоса строится по `y >= threshold`, а бюджет
@@ -250,6 +280,9 @@ SHD-C: critical_threshold=alarm_threshold, auto_band_ratio=True
 
 ## Артефакты
 
+- `bench_portfolio.py` → `bench_portfolio_{pm25,superconduct,reactor}_results.json`
+  (20 seeds; arms shd/kt/skt/portfolio/hard_gate + Wilcoxon)
+- `tests/test_portfolio_conformal.py` — 13 регрессий портфеля и конформаля
 - `bench_shdc.py` → `bench_shdc_{superconduct,pm25}_results.json` (20 seeds)
 - `bench_bank.py` → `bench_bank_results.json` (domain bank)
 - `bench_passport.py` → `bench_passport_results.json` (blend / recalibrate / bank)

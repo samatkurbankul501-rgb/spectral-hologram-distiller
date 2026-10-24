@@ -1,5 +1,52 @@
-# Spectral Hologram Distiller (SHD v3.13.2)
+# Spectral Hologram Distiller (SHD v3.14.0)
 
+> **v3.14.0 (2026-10-24): opt-in two-expert portfolio + Mondrian conformal
+> intervals.** Two new public classes in `shd.portfolio` (re-exported from
+> `shd`), both opt-in — the standalone distiller's numbers are unchanged:
+> (1) **`CoresetPortfolio`** — a soft gate that blends a critical-region
+> SHD-C expert and a global KernelRidge expert on demand. The gate is a
+> stacker fitted on out-of-fold predictions of BOTH experts on their own
+> coresets (a constant column in the gate design was the v3.13-era bug that
+> made the gate ignore the critical expert), plus an |alarm-margin| feature.
+> Inference re-scores each expert only where its gate weight is above the
+> generation-time floor, so the model (not just the blend) is evaluated.
+> An emergency band around the critical threshold floors gate weights at 1.0
+> — alarm priority over economy. Twenty-seed three-dataset benchmark
+> (`bench_portfolio.py`, Wilcoxon signed-rank, equal m=300 arms; the
+> portfolio holds 300+300 — a second expert is bought with cores, not with
+> new data): **SC** — crit **17.95** vs 18.81 SHD-C (p=4e-4), 23.26 KT,
+> 21.19 SKT, 19.57 hard-gate; global 15.41 = SHD-C 15.42 (p=0.52);
+> **PM2.5** — Pareto-best: crit **227.27** (SHD-C 231.01, KT 245.74) AND
+> global **86.67** (KT 89.89, SHD-C 95.08), both significant;
+> **reactor** — a hair worse on crit (3.45 vs 3.44, p=0.03) and equal on
+> global (0.98) while beating KT/SKT/hard-gate everywhere (p<1e-4): where
+> the critical expert alone is already enough, the portfolio stays out of
+> its way.
+> The hard threshold gate (`bench_moe_kt.py` routing) LOSES to the soft OOF
+> stacker on every dataset (SC 19.57, PM2.5 238.36/90.63, reactor
+> 4.20/1.12): the gate must read both experts' predictions, not a threshold.
+> The portfolio is opt-in — on a single-domain stream with a trusted
+> critical expert, SHD-C alone is the cheaper deployment.
+> (2) **`ConformalCrystal`** — split-conformal intervals around any fitted
+> model, calibrated on a stream slice (NOT on crystal rows: y-stratified
+> coresets are not exchangeable with the test stream — measured crit
+> coverage 0.23 vs target 0.90). `mondrian="alarm_zone"` groups calibration
+> rows by `pred >= threshold - delta` with delta chosen automatically to
+> keep >= `zone_fraction` (default 0.03, measured-optimal range 0.03–0.10)
+> of calibration rows inside the zone; group quantiles of the SIGNED
+> residual give exact 1-alpha coverage inside the zone on both bounds even
+> when the regressor systematically under-predicts peaks, and widen
+> honestly instead of hiding under nominal coverage. Measured on the
+> reactor (alpha=0.10, zone 106 calibration rows): in-zone coverage 0.953,
+> 66/122 true peaks captured at zf=0.03; zf=0.10 captures 116/122 at
+> in-zone coverage 0.946; zf=0.20 starts to drift (0.918) — wider is not
+> automatically better. `mondrian="threshold"` splits at the threshold
+> itself. Adaptive half-width scaling is a documented heuristic (marginal
+> split-conformal guarantee only); crystal-row calibration remains a
+> documented fallback with an exchangeability caveat. Regressions:
+> `tests/test_portfolio_conformal.py` (13 tests: contracts, determinism,
+> coverage guarantees, group fallback flagging, integration).
+>
 > **v3.13.2 (2026-10-24): thread-model for untrusted crystals + archive-handle
 > hygiene.** The loader is the package's boundary with the outside world, and
 > `.hologram.npz` crystals travel by email, pull requests and model
@@ -208,7 +255,7 @@ X_u, y_u, w_u = loader.get_training_data(weighting="uniform")  # critical-only
 # v3.13.1+: every crystal is versioned — schema + package version travel with
 # the file; summary() shows them, old crystals warn that their provenance
 # predates the schema contract:
-print(ld.summary()["schema_version"], ld.summary()["shd_version"])  # 1, 3.13.2
+print(ld.summary()["schema_version"], ld.summary()["shd_version"])  # 1, 3.14.0
 ```
 
 ## CLI (`python -m shd` / `shd`)

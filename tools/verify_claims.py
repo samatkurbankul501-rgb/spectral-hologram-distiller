@@ -307,7 +307,7 @@ for needle in [
     check_absent("paper stale " + needle, needle)
 
 for text in [
-    "# Spectral Hologram Distiller (SHD v3.13.2)",
+    "# Spectral Hologram Distiller (SHD v3.14.0)",
     "### 10. NASA C-MAPSS FD001: remaining useful life on the LOW tail",
     "DomainBank", "passport_recalibrate", 'weighting="uniform"',
     # "196.0" lived in the paper only (PM2.5 guard KRR-crit); the README
@@ -363,16 +363,16 @@ pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 # v3.13.2: SHD_VERSION in shd/distiller.py is the single source of truth;
 # shd/__init__.py re-exports it (__version__ = SHD_VERSION) instead of
 # duplicating the literal (the duplication is what drifted in v3.10/v3.11).
-check_text("version source 3.13.2", 'SHD_VERSION = "3.13.2"', distiller_src)
+check_text("version source 3.14.0", 'SHD_VERSION = "3.14.0"', distiller_src)
 check_text("version re-export", "__version__ = SHD_VERSION", version)
-check_text("pyproject 3.13.2", 'version = "3.13.2"', pyproject)
+check_text("pyproject 3.14.0", 'version = "3.14.0"', pyproject)
 # The three version carriers must agree; this is the check that would have
 # caught the v3.10.0/v3.11.0 drift before it reached the README title.
 check("version carriers agree",
-      1 if ('SHD_VERSION = "3.13.2"' in distiller_src
+      1 if ('SHD_VERSION = "3.14.0"' in distiller_src
             and "__version__ = SHD_VERSION" in version
-            and 'version = "3.13.2"' in pyproject
-            and "SHD v3.13.2" in README) else 0, 1, 0)
+            and 'version = "3.14.0"' in pyproject
+            and "SHD v3.14.0" in README) else 0, 1, 0)
 
 print(f"\n{checks} checks, {len(failures)} failures")
 if failures:
