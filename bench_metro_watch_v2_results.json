@@ -94,9 +94,9 @@
      "detected": false
     }
    ],
-   "learn_sec": 6.8,
-   "crystal_kb": 55.4,
-   "watch_scan_sec": 47.9
+   "learn_sec": 6.2,
+   "crystal_kb": 55.5,
+   "watch_scan_sec": 36.8
   },
   {
    "arm": "z_detrend",
@@ -187,7 +187,7 @@
      "detected": false
     }
    ],
-   "fit_sec": 1.1
+   "fit_sec": 0.7
   },
   {
    "arm": "shd_raw",
@@ -237,7 +237,7 @@
   {
    "arm": "shd_radar",
    "detrended": true,
-   "tau": 11.549324251856952,
+   "tau": 11.549096161975996,
    "calibration_episodes": 0,
    "calibration_alert_fraction": 0.0,
    "calibration_windows": 994,
@@ -311,5 +311,5 @@
    "severity": "High stress"
   }
  ],
- "elapsed_sec": 247.7
+ "elapsed_sec": 177.0
 }

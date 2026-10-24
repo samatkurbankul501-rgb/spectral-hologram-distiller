@@ -1,4 +1,0 @@
-Phi_sum shape: (64, 1) y_dim = 1
-G: (64, 64) B: (64, 1) W: (64,)
-fX shape: (6000,) y_pool shape: (6000,)
-resid shape: (6000,) OK

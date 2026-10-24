@@ -56,12 +56,12 @@
     "rare_captured": 12
    },
    "shd_guard": {
-    "krr_rmse_all": 103.88797156828011,
-    "krr_rmse_crit": 274.32654277472864,
-    "krr_r2": -0.2140596096921794,
-    "gbm_rmse_all": 87.59997915527451,
-    "gbm_rmse_crit": 187.76228809550327,
-    "gbm_r2": 0.13678797195191494,
+    "krr_rmse_all": 103.88797156828034,
+    "krr_rmse_crit": 274.326542774729,
+    "krr_r2": -0.21405960969218496,
+    "gbm_rmse_all": 87.59997915527448,
+    "gbm_rmse_crit": 187.7622880955033,
+    "gbm_r2": 0.1367879719519154,
     "rare_captured": 11
    }
   },
@@ -294,7 +294,7 @@
    }
   }
  ],
- "elapsed_sec": 111.53073450000375,
+ "elapsed_sec": 176.96347349999996,
  "summary": {
   "random": {
    "krr_crit_median": 262.0278074937591,
@@ -335,7 +335,7 @@
    "krr_crit_median": 218.3686207390321,
    "krr_all_median": 90.61323613552555,
    "gbm_crit_median": 210.71428125345685,
-   "gbm_all_median": 87.59997915527451,
+   "gbm_all_median": 87.59997915527448,
    "rare_median": 11.0
   }
  }

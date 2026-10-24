@@ -1,5 +1,46 @@
-# Spectral Hologram Distiller (SHD v3.12.1)
+# Spectral Hologram Distiller (SHD v3.13.0)
 
+> **v3.13.0 (2026-10-23): third defect hunt (probes in `tools/diag_metro_ms.py`,
+> regressions in `tests/test_v313_repairs.py`). Five suppressors fixed:
+> (1) `finalize_crystal` returned `rel_error` computed on a class attribute
+> instead of the instance's final spectral error, so the logged error was a
+> stale 0.0 — `rel_error` now comes from the instance accumulator.
+> (2) `_pool_predict` built the design matrix `B` as `(k,1)` for a (k, n) matrix,
+> silently dropping columns — it now builds `B` with the full `(k, n)` shape.
+> (3) `_mean_shift_distance` standardized window means against the crystal's
+> `X_mean`/`X_std`, which the distiller estimates from the FIRST batch only
+> (≈2.8 days of MetroPT-3); on near-constant features the stored `X_std`
+> floors at 1e-8 and z-scores exploded to ~3.9e7 (diagnosed in
+> `tools/diag_metro_ms.py`: feature LPS is near-constant in the first batch,
+> `X_std ≈ 0.0000`). The fix re-standardizes against the crystal's medoid
+> cloud (`self.X`, 300 real rows over the full learn window), matching the
+> validated prototype `tools/proto_metro_bw.py` — combined-radar tau dropped
+> from ~3.9e7 to a sane 11.55 on MetroPT-3.
+> (4) The v3.13.0 combined radar (`check_domain_shift(mean_shift=True)`) was
+> unusable on DELTA crystals: `_mean_shift_distance` compared the effective
+> window (2d features, x || dx) against the raw d-feature medoid cloud and
+> raised a broadcast error (probe `_check_delta_radar.py`: "operands could not
+> be broadcast together with shapes (8,) (4,)". The reference population is
+> now augmented with the medoid cloud's own first differences so both sides
+> live in the same [x || dx] space (regression in
+> `tests/test_v313_repairs.py`:
+> `test_delta_combined_radar_no_crash`).
+> (5) Streaming ordering: with `streaming=True`, the BW pass advanced the
+> loader's `_prev_row` to the current window's last row before the mean-shift
+> term ran, so `dX[0]` was computed as the wrap-around value (`X[0] - X[-1]`)
+> instead of the true continuation (`X[0] - previous call's last row`).
+> Fixed by snapshotting `_prev_row` before the BW pass and threading that
+> snapshot into the mean-shift term (`_effective_stream(prev_row=...)`).
+> Verified live on a trend stream (probe `_round3_probe_fix_verify.py`):
+> `dX[0]` now equals the continuation `[0.082, 0.041, -0.057]`, and the
+> measured metric impact on smooth streams is nil (max-z sits on the raw
+> features, so the mean-shift distance was unchanged: 0.8481098104 before
+> and after — a negative result, documented, not hidden). Statelessness
+> default is bit-identical: the headline stateless MetroPT-3 and seeds
+> numbers are unaffected (the metro bench never sets `_prev_row`).
+> **Benchmarks:** all four benches completed on this tree; see
+> `docs/SHD_V313_BENCH_REPORT.md` for the artifact-tied numbers.
+>
 > **v3.12.1 (2026-10-22): round-2 probe B — the anytime budget slice now
 > honours the requested row count.** `get_training_data(budget_points=k,
 > drop_unlabelled=True)` used to admit the peak band FIRST and then drop
@@ -718,9 +759,10 @@ pre-incident horizon; unmatched FA rates use the same observed-exposure
 denominator as the calibration budget (calendar-month rates are recorded
 alongside), so the reported rate and the budget are directly comparable.
 
-**Protocol v2 result (fresh run of the repaired code, 2026-10-20; artifacts:
-`bench_metro_watch_v2_results.json`, `metro_demo_v2_crystal.hologram.npz`).**
-All four arms are silent on calibration (0 episodes, alert fraction 0.000
+**Protocol v2 result (fresh run of the repaired code, 2026-10-22, SHD v3.13.0;
+artifacts: `bench_metro_watch_v2_results.json`,
+`metro_demo_v2_crystal.hologram.npz`).**
+All five arms are silent on calibration (0 episodes, alert fraction 0.000
 over 994 windows). On the 112-day watch (4,192 windows, 2.87 observed-exposure
 months):
 
@@ -730,23 +772,35 @@ months):
 | Feature-z, detrended | **4/4** | 131.3 / 392.9 / 415.4 / 163.7 | 15 | 1.74 |
 | IsolationForest, detrended | 2/4 | 392.4 / 394.6 (leaks 2–3) | 2 | 0.00 |
 | SHD passport, raw | 0/4 | — | 0 | 0.00 |
+| SHD combined radar (v3.13.0), detrended | **4/4** | 131.3 / 393.4 / 436.4 / 0.0 | 13 | **0.70** |
 
-This is a **negative result for the SHD spectral passport on this task**: at
-the budget-calibrated threshold the radar produces no alerts and misses all
-four labelled leaks, while the plain feature-z baseline — same windows, same
-EWMA detrending, same budget — catches all four with 5.5–17.3 days of lead at
-1.74 unmatched false alarms per observed month. Crystal: 54.8 KB, learn 4.7 s,
-watch scan 15.3 s.
+The v3.13.0 row is the new `shd_radar` arm: the Bures-Wasserstein distance
+combined with a mean-shift distance over window means. Fixing the mean-shift
+scale defect (the first-batch `X_std` is degenerate on near-constant features
+such as MetroPT-3 `LPS`; see the v3.13.0 changelog) turned a broken tau of
+~3.9e7 into a sane 11.55 — and with it the radar detects all four labelled
+leaks at 0.70 unmatched false alarms per observed month, inside the 1.0/month
+calibration budget, with leads of 5.5 to 18.2 days (leak #4 is caught on the
+day it starts). The pure spectral passport (BW only) stays silent — the
+negative result for the passport-as-sole-bottleneck stands; the mean-shift
+component is what carries the signal.
 
-The radar is not completely blind to the faults: the single largest detrended
-deviation of the entire 112-day watch slice occurs inside the 21-day window of
-Air leak #1 (`dev = 0.5292`, reaching 85.3% of the calibrated `tau = 0.6207`;
-Air leaks #2 and #3 peak at 64.4% of tau, #4 at 34.6%). But the budget
-calibration forces tau above those peaks to keep the false-alarm rate at or
-below 1/month on the healthy slice, so none of them crosses into an alarm.
-The v1 hypothesis that representation quality was the bottleneck does not
-survive the corrected protocol; any SHD claim about compressor early warning
-needs a different detector design, not a defence of this one.
+The feature-z baseline keeps its 4/4 with 5.5–17.3 days of lead, but at
+1.74 unmatched FA/month it exceeds the calibrated 1.0 budget — under the
+protocol's budget discipline it is not deployable as-is. The combined radar
+matches its detection count at less than half the alarm rate. Crystal:
+55.4 KB, learn 6.8 s, watch scan 47.9 s.
+
+For the pure passport the picture is unchanged: the radar is not completely
+blind to the faults — the single largest detrended deviation of the entire
+112-day watch slice occurs inside the 21-day window of Air leak #1
+(`dev = 0.5292`, reaching 85.3% of the calibrated `tau = 0.6207`; Air leaks #2
+and #3 peak at 64.4% of tau, #4 at 34.6%). But the budget calibration forces
+tau above those peaks to keep the false-alarm rate at or below 1/month on the
+healthy slice, so none of them crosses into an alarm. The v1 hypothesis that
+representation quality alone was the bottleneck does not survive the corrected
+protocol: detection required adding the mean-shift component on top of the
+passport (v3.13.0), not a defence of the passport alone.
 
 ### 10. NASA C-MAPSS FD001: remaining useful life on the LOW tail (`bench_cmapss.py`)
 

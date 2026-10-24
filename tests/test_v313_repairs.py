@@ -141,6 +141,45 @@ def test_combined_radar_separates_shift(tmp_path):
     assert rep_legacy["is_shifted"] == (rep_legacy["bw_distance"] > rep_legacy["threshold"])
 
 
+def test_delta_combined_radar_no_crash(tmp_path):
+    """Combined radar on a DELTA crystal must not crash.
+
+    Before the fix, `_mean_shift_distance` compared the effective window
+    (2*d features: x || dx) against the raw d-feature medoid cloud and
+    raised a broadcast ValueError -- the v3.13.0 combined radar was simply
+    unusable on delta crystals (measured on a synthetic delta crystal:
+    'operands could not be broadcast together with shapes (8,) (4,)').
+    """
+    rng = np.random.default_rng(42)
+    N, D, WIN = 3000, 4, 60
+    X = rng.normal(0, 1, size=(N, D))
+    y = X.sum(axis=1) + 0.1 * rng.normal(size=N)
+    d = SpectralHologramDistiller(crystal_size=120, include_deltas=True,
+                                   high_band_ratio=0.26, random_state=7)
+    for i in range(0, N, 4000):
+        d.partial_fit(X[i:i + 4000], y[i:i + 4000])
+    d.finalize_crystal()
+    path = str(tmp_path / "delta.hologram.npz")
+    d.save_hologram(path, rank_passport=32)
+    loader = HologramCrystalLoader(path)
+    window = X[:WIN]  # raw d-feature window (delta crystal input contract)
+    # BW-only radar still works:
+    bw = loader.check_domain_shift(window)
+    assert "bw_distance" in bw
+    # Combined radar (mean_shift=True) must now work on a delta crystal:
+    rep = loader.check_domain_shift(window, mean_shift=True)
+    assert set(("mean_shift_distance", "combined_distance",
+                 "combined_threshold", "is_shifted")) <= set(rep)
+    assert rep["combined_distance"] == rep["bw_distance"] + rep["mean_shift_distance"]
+    assert np.isfinite(rep["mean_shift_distance"])
+    # The reference population lives in the SAME [x || dx] space as the window:
+    # z-scores must be on a sane scale (a +3.0 mean shift must move the term)
+    Xw2 = X[:WIN] + 3.0
+    rep1 = loader.check_domain_shift(Xw2, mean_shift=True)
+    assert rep1["mean_shift_distance"] > rep["mean_shift_distance"]
+    assert rep1["combined_distance"] > rep["combined_distance"]
+
+
 def test_ms_calibration_roundtrip_and_heal_invalidates(tmp_path):
     """calibrate_threshold_ms calibrates ms_tau on a healthy reference and the
     calibration survives save/load; heal_domain_shift resets both calibrations."""

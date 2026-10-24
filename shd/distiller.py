@@ -1706,13 +1706,18 @@ class HologramCrystalLoader:
         # is the rank-scaled BW constant -- the mean-shift term rides along.
         return float(BW_ALERT_THRESHOLD * sample_scale * rank_scale)
 
-    def _effective_stream(self, X_stream, remember_prev_row=False):
+    def _effective_stream(self, X_stream, remember_prev_row=False, prev_row=None):
         """Raw effective feature matrix for the mean-shift term (v3.13.0).
 
         Mirrors :meth:`_normalize_stream`'s delta augmentation WITHOUT the
         per-row normalization/clip, so the window mean is computed on the raw
         (x, or x||dx for delta crystals) features. For non-delta crystals this
         is the stream as-is; the width must equal ``len(self.X_mean)``.
+
+        ``prev_row`` lets the caller pin the continuity row explicitly: the
+        combined-radar path passes the snapshot captured before the BW pass
+        advanced the loader state, so the mean-shift term uses the previous
+        call's last row (continuation) even though it runs after the BW pass.
         """
         X = np.asarray(X_stream, dtype=np.float64)
         if X.ndim == 1:
@@ -1729,10 +1734,18 @@ class HologramCrystalLoader:
                 dX = np.zeros_like(X, dtype=np.float64)
                 if len(X) > 1:
                     dX[1:] = X[1:] - X[:-1]
-                if remember_prev_row and self._prev_row is not None:
-                    dX[0] = X[0] - self._prev_row
-                if remember_prev_row and len(X) > 0:
-                    self._prev_row = np.asarray(X[-1], dtype=np.float64).copy()
+                if remember_prev_row:
+                    # Prefer the explicit snapshot (captured BEFORE the BW pass
+                    # advanced the loader state) so a mean-shift term evaluated in
+                    # the same check_domain_shift call still sees the PREVIOUS
+                    # call's last row, not this window's own last row (the v3.13.0
+                    # wrap-around ordering defect: _bw_distance runs first and
+                    # reassigns self._prev_row before the mean-shift term ran).
+                    prev = prev_row if prev_row is not None else self._prev_row
+                    if prev is not None:
+                        dX[0] = X[0] - prev
+                    if remember_prev_row and len(X) > 0:
+                        self._prev_row = np.asarray(X[-1], dtype=np.float64).copy()
                 return np.hstack([X, dX])
             elif X.shape[1] == expected:
                 return X
@@ -1750,7 +1763,9 @@ class HologramCrystalLoader:
                 )
             return X
 
-    def _mean_shift_distance(self, X_stream, distiller_ref=None, remember_prev_row=False):
+    def _mean_shift_distance(
+        self, X_stream, distiller_ref=None, remember_prev_row=False, prev_row=None
+    ):
         """Max per-feature standardized mean deviation of one window (v3.13.0).
 
         Leak signatures on MetroPT-3 appear as mean shifts, which the
@@ -1772,8 +1787,26 @@ class HologramCrystalLoader:
         and it travels with ``heal_domain_shift`` (injected medoids shift the
         reference population with it).
         """
-        X_eff = self._effective_stream(X_stream, remember_prev_row=remember_prev_row)
-        ref = self.X
+        X_eff = self._effective_stream(
+            X_stream, remember_prev_row=remember_prev_row, prev_row=prev_row
+        )
+        if self.include_deltas:
+            # The effective window lives in the 2*d space [x || dx]; the reference
+            # population must live in the SAME space. The crystal's medoids are
+            # stored in raw d-feature space (heal_domain_shift refuses
+            # pre-augmented windows for the same width-mismatch reason), so
+            # augment the medoid cloud with its own first differences:
+            # dx[0] = 0 (no earlier medoid), dx[i] = X[i] - X[i-1] for i > 0.
+            # The legacy persisted X_mean (first-batch raw-space statistics) is
+            # deliberately NOT the reference here: it is the raw-space
+            # first-batch statistic, in the WRONG space, and it would re-introduce
+            # the scale defect v3.13.0 fixed (degenerate first-batch stds on
+            # near-constant features).
+            dX = np.zeros_like(self.X)
+            dX[1:] = self.X[1:] - self.X[:-1]
+            ref = np.hstack([self.X, dX])
+        else:
+            ref = self.X
         mu = ref.mean(axis=0)
         sd = ref.std(axis=0)
         ok = sd > 1e-9
@@ -1815,6 +1848,17 @@ class HologramCrystalLoader:
         score is what a deployment device should alarm on. Default ``False``
         keeps the existing behaviour bit-identical.
         """
+        # Capture the continuity state BEFORE _bw_distance runs: the BW pass
+        # advances self._prev_row to this window's last row, so the mean-shift
+        # term (evaluated afterwards in the same call) must use this snapshot
+        # to keep true cross-call continuity (dX[0] = X[0] - previous call's
+        # last row) instead of the wrap-around value (X[0] - this window's last
+        # row) the v3.13.0 ordering produced.
+        if streaming:
+            prev_row_snapshot = (None if self._prev_row is None
+                                 else np.asarray(self._prev_row, dtype=np.float64).copy())
+        else:
+            prev_row_snapshot = None
         t0 = time.perf_counter()
         bw_dist, n_rows = self._bw_distance(
             X_new_stream, distiller_ref=distiller_ref, remember_prev_row=streaming
@@ -1830,7 +1874,8 @@ class HologramCrystalLoader:
         }
         if mean_shift:
             ms, _ = self._mean_shift_distance(
-                X_new_stream, distiller_ref=distiller_ref, remember_prev_row=streaming
+                X_new_stream, distiller_ref=distiller_ref,
+                remember_prev_row=streaming, prev_row=prev_row_snapshot
             )
             combined = float(bw_dist + ms)
             ms_thr = self._calibrated_threshold_ms(n_rows, adaptive_threshold=adaptive_threshold)
