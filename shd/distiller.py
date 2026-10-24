@@ -28,15 +28,21 @@ from __future__ import annotations
 
 import os
 import time
+import warnings
 
 import numpy as np
 from scipy import linalg
 from scipy.spatial.distance import cdist
 
-__all__ = ["SpectralHologramDistiller", "HologramCrystalLoader", "BW_ALERT_THRESHOLD"]
+__all__ = ["SpectralHologramDistiller", "HologramCrystalLoader", "BW_ALERT_THRESHOLD", "SHD_VERSION"]
 
 #: Default Bures-Wasserstein alert threshold for the domain-shift radar.
 BW_ALERT_THRESHOLD = 0.085
+
+#: Package version, single source of truth (re-exported as ``shd.__version__``).
+#: Recorded into every .hologram.npz at save time so a crystal can always tell
+#: which build distilled it.
+SHD_VERSION = "3.13.1"
 
 
 class SpectralHologramDistiller:
@@ -302,6 +308,34 @@ class SpectralHologramDistiller:
         # inside build_global_guard(); None until then.
         self._resid_mean = None
         self._resid_std = None
+
+        # v3.13.1: reuse ONE Cholesky factorisation per batch. Every batch
+        # changes Psi_sum, so the factor is rebuilt lazily at most once per
+        # batch and shared by the leverage scores and the ridge head
+        # (previously partial_fit factorised Psi_hat twice per batch:
+        # O(B k^3) -> O(B k^2) for the whole-stream fit).
+        self._chol_cache = None  # (n_seen_at_factorisation, cho_factor)
+
+    def _chol_psi(self, Psi_hat: np.ndarray):
+        """Cholesky of ``Psi_hat + beta_low * I`` with a per-batch cache.
+
+        Keyed on ``n_seen``: the accumulators only change inside
+        :meth:`partial_fit`, so a factorisation computed at row count N stays
+        valid for every solve at the same N (the leverage pass and the ridge
+        head read exactly the same ``Psi_hat``). External state mutations
+        (direct ``Psi_sum`` writes, restore-from-state) must call
+        :meth:`_invalidate_chol` or reset ``n_seen``.
+        """
+        if self._chol_cache is not None and self._chol_cache[0] == self.n_seen:
+            return self._chol_cache[1]
+        I_k = np.eye(self.k, dtype=np.float64)
+        factor = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
+        self._chol_cache = (int(self.n_seen), factor)
+        return factor
+
+    def _invalidate_chol(self) -> None:
+        """Drop the cached Cholesky factor (call after touching Psi_sum directly)."""
+        self._chol_cache = None
 
     # --- internals -----------------------------------------------------------
 
@@ -955,8 +989,7 @@ class SpectralHologramDistiller:
                 self.Psi_sum += U_B.T @ U_B
                 self.n_seen += B
                 Psi_hat = self.Psi_sum / self.n_seen
-                I_k = np.eye(self.k, dtype=np.float64)
-                L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
+                L_low = self._chol_psi(Psi_hat)
                 V_B = linalg.cho_solve(L_low, U_B.T).T
                 lev = np.sum(U_B * V_B, axis=1)
                 y_batch = lev[:, None]
@@ -969,8 +1002,7 @@ class SpectralHologramDistiller:
                 self.Psi_sum += U_B.T @ U_B
                 self.n_seen += B
                 Psi_hat = self.Psi_sum / self.n_seen
-                I_k = np.eye(self.k, dtype=np.float64)
-                L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
+                L_low = self._chol_psi(Psi_hat)
                 V_B = linalg.cho_solve(L_low, U_B.T).T
                 lev = np.sum(U_B * V_B, axis=1)
                 y_batch = lev[:, None]
@@ -994,8 +1026,7 @@ class SpectralHologramDistiller:
             Psi_hat = self.Psi_sum / self.n_seen
             Phi_hat = self.Phi_sum / self.n_seen
 
-            I_k = np.eye(self.k, dtype=np.float64)
-            L_low = linalg.cho_factor(Psi_hat + self.beta_low * I_k, lower=True)
+            L_low = self._chol_psi(Psi_hat)
             W_pred = linalg.cho_solve(L_low, Phi_hat)
 
         # Background accumulator for the passport reference. The phase score is
@@ -1259,6 +1290,13 @@ class SpectralHologramDistiller:
             Psi_ref = Psi_hat
         eigvals, eigvecs = linalg.eigh(Psi_ref)
         payload = dict(
+            # v3.13.1: the artifact's format contract travels with the file. A
+            # loader written for schema 1 must be able to reject (not silently
+            # misread) an artifact it was never meant to parse -- the failure
+            # mode without a version key is a KeyError three fields later.
+            schema_version=np.array([1], dtype=np.int64),
+            schema_min_loader=np.array([1], dtype=np.int64),
+            shd_version=np.array(SHD_VERSION),
             crystal_X=self.crystal_X.astype(np.float32),
             crystal_Y=self.crystal_Y.astype(np.float32),
             gamma_weights=self.gamma_weights.astype(np.float32),
@@ -1299,9 +1337,82 @@ class HologramCrystalLoader:
     :meth:`check_domain_shift`.
     """
 
+    #: Highest artifact schema this loader understands (v3.13.1). Artifacts
+    #: written by older shd versions without the key load as schema 1.
+    LOADER_SCHEMA = 1
+
+    @staticmethod
+    def _read_schema(data) -> int:
+        """Read the artifact schema version from a loaded .npz (v3.13.1).
+
+        Legacy artifacts (v3.7 .. v3.13.0) carry no ``schema_version`` key;
+        they are read as schema 1 -- the pre-versioning layout IS schema 1.
+        Newer schemas are accepted when this loader claims to understand at
+        least their baseline, otherwise the mismatch is an explicit error at
+        load time (the schema contract the crystals previously lacked).
+        """
+        if "schema_version" not in data.files:
+            return 1  # legacy pre-versioning artifact
+        try:
+            schema = int(np.asarray(data["schema_version"]).reshape(-1)[0])
+        except Exception as exc:  # corrupt / non-numeric payload
+            raise ValueError(
+                f"artifact stores an unreadable schema_version: {exc!r}"
+            ) from exc
+        if "schema_min_loader" in data.files:
+            try:
+                min_loader = int(np.asarray(data["schema_min_loader"]).reshape(-1)[0])
+            except Exception as exc:
+                raise ValueError(
+                    f"artifact stores an unreadable schema_min_loader: {exc!r}"
+                ) from exc
+            if min_loader > HologramCrystalLoader.LOADER_SCHEMA:
+                raise ValueError(
+                    f"artifact schema {schema} requires a loader understanding "
+                    f"schema {min_loader}; this loader understands up to schema "
+                    f"{HologramCrystalLoader.LOADER_SCHEMA} -- upgrade the shd package"
+                )
+        return schema
+
+    @staticmethod
+    def _warn_schema_drift(schema: int, has_key: bool = True) -> None:
+        """Warn when an artifact predates the loader's schema (v3.13.1).
+
+        Two drift cases: (a) the artifact carries NO ``schema_version`` key --
+        it was distilled by a pre-3.13.1 build and its provenance is
+        unverifiable; (b) the artifact's schema number is lower than this
+        loader's -- future loaders must not present old-crystal reports as
+        current-schema ones. Loading proceeds either way (schema 1 IS the
+        legacy layout), the crystal's fields stay trustworthy; the warning
+        keeps provenance honest in reports.
+        """
+        if not has_key:
+            warnings.warn(
+                "artifact carries no schema_version key: distilled by a "
+                "pre-3.13.1 build; treat its provenance as unverified "
+                "(re-distill or re-save with shd >= 3.13.1 to version it)",
+                UserWarning,
+                stacklevel=3,
+            )
+        elif schema < HologramCrystalLoader.LOADER_SCHEMA:
+            warnings.warn(
+                f"artifact schema {schema} < loader schema "
+                f"{HologramCrystalLoader.LOADER_SCHEMA}; legacy defaults apply",
+                UserWarning,
+                stacklevel=3,
+            )
+
     def __init__(self, filepath: str = "hologram.npz", include_deltas: bool | None = None):
         data = np.load(filepath, allow_pickle=False)
         self.filepath = filepath
+        self.schema_version = HologramCrystalLoader._read_schema(data)
+        HologramCrystalLoader._warn_schema_drift(
+            self.schema_version, has_key="schema_version" in data.files
+        )
+        if "shd_version" in data.files:
+            self.shd_version = str(np.asarray(data["shd_version"]).reshape(-1)[0])
+        else:
+            self.shd_version = None  # pre-3.13.1 crystal: distilled before versioning
         self.X = data["crystal_X"].astype(np.float64)
         self.y = data["crystal_Y"].astype(np.float64)
         self.weights = data["gamma_weights"].astype(np.float64)
@@ -2356,6 +2467,11 @@ class HologramCrystalLoader:
         """
         out_path = filepath or self.filepath
         payload = dict(
+            # A healed crystal keeps the SAME schema contract as its parent
+            # artifact (v3.13.1): the heal adds medoids, not new fields.
+            schema_version=np.array([HologramCrystalLoader.LOADER_SCHEMA], dtype=np.int64),
+            schema_min_loader=np.array([HologramCrystalLoader.LOADER_SCHEMA], dtype=np.int64),
+            shd_version=np.array(SHD_VERSION),
             crystal_X=self.X.astype(np.float32),
             crystal_Y=self.y.astype(np.float32),
             gamma_weights=self.weights.astype(np.float32),
@@ -2400,6 +2516,8 @@ class HologramCrystalLoader:
         return {
             "filepath": self.filepath,
             "file_size_kb": round(float(size_kb), 2),
+            "schema_version": int(self.schema_version),
+            "shd_version": self.shd_version,
             "n_medoids": int(self.X.shape[0]),
             "n_features": int(self.X.shape[1]),
             "n_seen": int(self.n_seen),

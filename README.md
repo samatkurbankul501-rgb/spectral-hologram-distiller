@@ -1,5 +1,25 @@
-# Spectral Hologram Distiller (SHD v3.13.0)
+# Spectral Hologram Distiller (SHD v3.13.1)
 
+> **v3.13.1 (2026-10-24): technical-debt pass from the startup audit — artifact
+> schema contract + one Cholesky factorisation per batch.** Two holes closed,
+> regressions in `tests/test_v3131_schema_and_chol.py`, package version is now
+> stamped inside every crystal:
+> (1) **schema_version in the artifact** — `save_hologram` (and
+> `HologramCrystalLoader.save` after `heal_domain_shift`) writes
+> `schema_version`, `schema_min_loader` and `shd_version`; `summary()` reports
+> both. The loader rejects artifacts demanding a newer loader at load time,
+> warns on crystals distilled by a pre-3.13.1 build (their provenance is
+> unverified: `artifacts/superconduct_v37.hologram.npz` and the two
+> `metro_demo_*` crystals are legacy now), and never swallows a corrupt
+> `schema_version`. Legacy v3.13.0 files load exactly as before, just with the
+> provenance warning.
+> (2) **per-batch Cholesky cache** — `partial_fit` previously factorised
+> `Psi_hat + beta_low*I` TWICE per batch (leverage scores + ridge head,
+> O(k³) each); now one cached factorisation per batch shared by both consumers
+> (`_chol_psi` keyed on `n_seen`, `_invalidate_chol` for external writes).
+> Bit-identical results (cached factor matches a fresh one, regressions
+> assert reuse/refresh/equality), so no benchmark number changes.
+>
 > **v3.13.0 (2026-10-23): third defect hunt (probes in `tools/diag_metro_ms.py`,
 > regressions in `tests/test_v313_repairs.py`). Five suppressors fixed:
 > (1) `finalize_crystal` returned `rel_error` computed on a class attribute
@@ -170,6 +190,11 @@ loader.save("my_crystal_healed.hologram.npz")
 # Per-deployment weighting (see bench_weights_*):
 X_g, y_g, w_g = loader.get_training_data(weighting="gamma")    # default
 X_u, y_u, w_u = loader.get_training_data(weighting="uniform")  # critical-only
+
+# v3.13.1: every crystal is versioned — schema + package version travel with
+# the file; summary() shows them, old crystals warn that their provenance
+# predates the schema contract:
+print(ld.summary()["schema_version"], ld.summary()["shd_version"])  # 1, 3.13.1
 ```
 
 ## CLI (`python -m shd` / `shd`)

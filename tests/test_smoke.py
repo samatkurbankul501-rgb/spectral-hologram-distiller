@@ -8,6 +8,7 @@ phase-peak regimes, then round-trips the artifacts through HologramCrystalLoader
 import os
 import sys
 import tempfile
+import warnings
 
 import numpy as np
 
@@ -92,7 +93,7 @@ def _fit_crystal(X, y, tail, crystal_size=80, seed=3):
 
 
 def test_version():
-    assert __version__ == "3.13.0"
+    assert __version__ == "3.13.1"
 
 
 def test_distiller_shapes(distilled):
@@ -141,7 +142,8 @@ def test_ood_radar(distilled):
 
 def test_legacy_artifact_without_projector():
     """The published superconduct_v37 artifact has no Omega/phase: loader must
-    load it and only require a distiller_ref for the radar."""
+    load it, only require a distiller_ref for the radar, and warn that the
+    pre-3.13.1 crystal carries no schema_version (v3.13.1 schema contract)."""
     art = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "artifacts",
@@ -152,7 +154,16 @@ def test_legacy_artifact_without_projector():
             pytest.skip("artifact not present")
         print("SKIP  test_legacy_artifact_without_projector (artifact not present)")
         return
-    loader = HologramCrystalLoader(art)
+    if pytest is not None:
+        with pytest.warns(UserWarning, match="pre-3.13.1"):
+            loader = HologramCrystalLoader(art)
+    else:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            loader = HologramCrystalLoader(art)
+        assert any("pre-3.13.1" in str(w.message) for w in caught), (
+            "legacy pre-3.13.1 artifact must warn about unverified provenance"
+        )
     assert loader.X.shape[1] == 81
     assert loader.n_seen == 17010
     if pytest is not None:
