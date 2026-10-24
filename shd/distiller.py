@@ -42,7 +42,7 @@ BW_ALERT_THRESHOLD = 0.085
 #: Package version, single source of truth (re-exported as ``shd.__version__``).
 #: Recorded into every .hologram.npz at save time so a crystal can always tell
 #: which build distilled it.
-SHD_VERSION = "3.13.1"
+SHD_VERSION = "3.13.2"
 
 
 class SpectralHologramDistiller:
@@ -1351,7 +1351,7 @@ class HologramCrystalLoader:
         least their baseline, otherwise the mismatch is an explicit error at
         load time (the schema contract the crystals previously lacked).
         """
-        if "schema_version" not in data.files:
+        if "schema_version" not in data:
             return 1  # legacy pre-versioning artifact
         try:
             schema = int(np.asarray(data["schema_version"]).reshape(-1)[0])
@@ -1359,7 +1359,7 @@ class HologramCrystalLoader:
             raise ValueError(
                 f"artifact stores an unreadable schema_version: {exc!r}"
             ) from exc
-        if "schema_min_loader" in data.files:
+        if "schema_min_loader" in data:
             try:
                 min_loader = int(np.asarray(data["schema_min_loader"]).reshape(-1)[0])
             except Exception as exc:
@@ -1403,13 +1403,23 @@ class HologramCrystalLoader:
             )
 
     def __init__(self, filepath: str = "hologram.npz", include_deltas: bool | None = None):
-        data = np.load(filepath, allow_pickle=False)
         self.filepath = filepath
+        # v3.13.2: materialise the whole payload up front and close the archive
+        # before anything else runs. On Windows an open NpzFile keeps the .npz
+        # locked, which broke TemporaryDirectory cleanup in tests and file
+        # replacement in long-lived streaming sessions; materialising first also
+        # guarantees the structural validation below never reads a half-open
+        # archive. The payload dict is the untrusted-input boundary.
+        npz = np.load(filepath, allow_pickle=False)
+        try:
+            data = {key: npz[key] for key in npz.files}
+        finally:
+            npz.close()
         self.schema_version = HologramCrystalLoader._read_schema(data)
         HologramCrystalLoader._warn_schema_drift(
-            self.schema_version, has_key="schema_version" in data.files
+            self.schema_version, has_key="schema_version" in data
         )
-        if "shd_version" in data.files:
+        if "shd_version" in data:
             self.shd_version = str(np.asarray(data["shd_version"]).reshape(-1)[0])
         else:
             self.shd_version = None  # pre-3.13.1 crystal: distilled before versioning
@@ -1422,9 +1432,82 @@ class HologramCrystalLoader:
         self.X_std = data["X_std"].astype(np.float64)
         self.n_seen = int(data["n_seen"][0])
 
+        # v3.13.1 thread-model: an .hologram.npz crystal is UNTRUSTED input --
+        # it travels through email, pull requests and model marketplaces.
+        # ``allow_pickle=False`` above already blocks code execution; these
+        # structural checks make a broken or poisoned file fail HERE with a
+        # clear message instead of exploding later deep inside the radar or a
+        # downstream fit with a confusing shape/NaN error.
+        if self.X.ndim != 2 or self.X.shape[0] < 1:
+            raise ValueError(
+                f"artifact stores crystal_X with shape {self.X.shape}; "
+                "a crystal must be a non-empty (rows, features) matrix -- "
+                "the artifact is inconsistent"
+            )
+        rows, d_dim = self.X.shape
+        for name, arr in (
+            ("crystal_X", self.X), ("crystal_Y", self.y),
+            ("gamma_weights", self.weights),
+            ("passport_eigvals", self.eigvals),
+            ("passport_eigvecs", self.eigvecs),
+            ("X_mean", self.X_mean), ("X_std", self.X_std),
+        ):
+            if not np.all(np.isfinite(arr)):
+                raise ValueError(
+                    f"artifact stores non-finite values in {name}; "
+                    "the artifact is inconsistent"
+                )
+        if self.y.shape != (rows,):
+            raise ValueError(
+                f"artifact declares crystal_Y of shape {self.y.shape} but "
+                f"crystal_X has {rows} rows; the artifact is inconsistent"
+            )
+        if self.weights.shape != (rows,):
+            raise ValueError(
+                f"artifact declares gamma_weights of shape {self.weights.shape} "
+                f"but crystal_X has {rows} rows; the artifact is inconsistent"
+            )
+        if np.any(self.weights < 0):
+            raise ValueError(
+                "artifact stores negative gamma_weights (they feed a weighted "
+                "ridge head); the artifact is inconsistent"
+            )
+        if (self.eigvals.ndim != 1 or self.eigvecs.ndim != 2
+                or self.eigvecs.shape[0] < 1
+                or self.eigvecs.shape[1] != self.eigvals.shape[0]):
+            raise ValueError(
+                f"artifact declares passport_eigvals of shape {self.eigvals.shape} "
+                f"and passport_eigvecs of shape {self.eigvecs.shape}; the passport "
+                "must be eigvals (rank,) + eigvecs (sketch_dim, rank) -- "
+                "the artifact is inconsistent"
+            )
+        # X_mean/X_std carry the column statistics of the distilled stream: width
+        # d for a plain crystal, 2d for a delta one (x||dx). A legacy delta
+        # crystal may load with include_deltas=False (the flag postdates it), so
+        # only other widths are inconsistent here; the odd-width delta case is
+        # rejected further below.
+        if (
+            len(self.X_mean) not in (d_dim, 2 * d_dim)
+            or self.X_std.shape != self.X_mean.shape
+        ):
+            raise ValueError(
+                f"artifact declares X_mean/X_std of width "
+                f"{len(self.X_mean)}/{len(self.X_std)} but crystal_X has "
+                f"{d_dim} features (expected {d_dim} for a plain crystal or "
+                f"{2 * d_dim} for a delta one); the artifact is inconsistent"
+            )
+        if np.any(self.X_std < 0):
+            raise ValueError(
+                "artifact stores negative X_std; the artifact is inconsistent"
+            )
+        if self.n_seen < 1:
+            raise ValueError(
+                f"artifact declares n_seen={self.n_seen}; the artifact is inconsistent"
+            )
+
         # Which rows carry a real target. Legacy artifacts predate the field:
         # every row is treated as labelled.
-        if "y_labelled" in data.files:
+        if "y_labelled" in data:
             self.y_labelled = np.asarray(data["y_labelled"], dtype=bool).reshape(-1)
             if len(self.y_labelled) != len(self.y):
                 raise ValueError(
@@ -1437,7 +1520,7 @@ class HologramCrystalLoader:
         self._target_placeholder = float(np.median(self.y[self.y_labelled])) if self._has_real_targets else 0.0
 
         self.k_dim = self.eigvecs.shape[0]
-        if "tail" in data.files:
+        if "tail" in data:
             self.tail = str(np.asarray(data["tail"]).item())
         else:
             self.tail = "high"  # legacy artifacts predate the tail field
@@ -1446,7 +1529,7 @@ class HologramCrystalLoader:
 
         if include_deltas is not None:
             self.include_deltas = bool(include_deltas)
-        elif "include_deltas" in data.files:
+        elif "include_deltas" in data:
             self.include_deltas = bool(np.asarray(data["include_deltas"]).item())
         else:
             # Legacy artifacts predate the flag. Treat them as plain (non-delta)
@@ -1462,7 +1545,7 @@ class HologramCrystalLoader:
         # Band split used at distillation time; heal_domain_shift protects this
         # fraction of the crystal's phase-peak band when pruning under a cap.
         # Legacy artifacts predate the field and fall back to the 0.26 default.
-        if "high_band_ratio" in data.files:
+        if "high_band_ratio" in data:
             br = float(np.asarray(data["high_band_ratio"]).reshape(-1)[0])
             self.high_band_ratio = br if 0.0 < br < 1.0 else 0.26
         else:
@@ -1470,7 +1553,7 @@ class HologramCrystalLoader:
 
         # Which population the passport describes. Legacy artifacts predate
         # the field and were built over the whole stream.
-        if "passport_reference" in data.files:
+        if "passport_reference" in data:
             ref = str(np.asarray(data["passport_reference"]).item())
             self.passport_reference = ref if ref in ("background", "stream") else "stream"
         else:
@@ -1481,7 +1564,7 @@ class HologramCrystalLoader:
         # and heal's protected band all read the SAME definition the lattice
         # was built with (v3.12.0); legacy artifacts predate the field and
         # have no threshold-driven band.
-        if "critical_threshold" in data.files:
+        if "critical_threshold" in data:
             ct = float(np.asarray(data["critical_threshold"]).reshape(-1)[0])
             self.critical_threshold = None if np.isnan(ct) else ct
         else:
@@ -1489,7 +1572,7 @@ class HologramCrystalLoader:
 
         # Per-deployment radar calibration (v3.12.0). Legacy artifacts and
         # uncalibrated loaders fall back to the rank-scaled default constant.
-        if "tau_calibrated" in data.files:
+        if "tau_calibrated" in data:
             self.tau_calibrated = float(np.asarray(data["tau_calibrated"]).reshape(-1)[0])
             self.tau_window = int(np.asarray(data["tau_window"]).reshape(-1)[0])
             self.tau_n_windows = int(np.asarray(data["tau_n_windows"]).reshape(-1)[0])
@@ -1507,7 +1590,7 @@ class HologramCrystalLoader:
         # artifacts and uncalibrated loaders leave both None, in which case
         # check_domain_shift(mean_shift=True) falls back to scoring the
         # mean-shift term against the rank-scaled default threshold.
-        if "ms_tau_calibrated" in data.files:
+        if "ms_tau_calibrated" in data:
             self.ms_tau_calibrated = float(np.asarray(data["ms_tau_calibrated"]).reshape(-1)[0])
             self.ms_tau_window = int(np.asarray(data["ms_tau_window"]).reshape(-1)[0])
             self.ms_tau_n_windows = int(np.asarray(data["ms_tau_n_windows"]).reshape(-1)[0])
@@ -1520,7 +1603,7 @@ class HologramCrystalLoader:
 
         self._prev_row = None  # last raw row of the previous streaming radar call
 
-        if "Omega" in data.files:
+        if "Omega" in data:
             self.Omega = data["Omega"].astype(np.float64)
             self.phase = data["phase"].astype(np.float64)
         else:

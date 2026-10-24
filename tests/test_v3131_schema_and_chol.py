@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shd import HologramCrystalLoader, SpectralHologramDistiller  # noqa: E402
+from shd import HologramCrystalLoader, SHD_VERSION, SpectralHologramDistiller  # noqa: E402
 
 SHD_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -56,10 +56,10 @@ def test_current_artifact_stores_schema_and_package_version(tmp_path):
 
     ld = HologramCrystalLoader(path)
     assert ld.schema_version == 1
-    assert ld.shd_version == "3.13.1"
+    assert ld.shd_version == SHD_VERSION
     s = ld.summary()
     assert s["schema_version"] == 1
-    assert s["shd_version"] == "3.13.1"
+    assert s["shd_version"] == SHD_VERSION
 
 
 def test_legacy_artifact_without_keys_loads_with_warning(tmp_path):
@@ -126,7 +126,7 @@ def test_healed_crystal_roundtrip_keeps_schema_contract(tmp_path):
 
     ld2 = HologramCrystalLoader(healed_path)
     assert ld2.schema_version == 1
-    assert ld2.shd_version == "3.13.1"
+    assert ld2.shd_version == SHD_VERSION
 
 
 def test_cholesky_cache_reused_within_batch_and_refreshed_per_batch():
@@ -174,8 +174,8 @@ def test_cholesky_cache_is_invalidated_by_external_psi_sum_write():
     assert d._chol_cache is not None
 
 
-def test_package_version_is_3_13_1():
+def test_package_version_matches_SHD_VERSION():
     from shd import SHD_VERSION, __version__
 
-    assert SHD_VERSION == "3.13.1"
+    assert SHD_VERSION == "3.13.2"
     assert __version__ == SHD_VERSION

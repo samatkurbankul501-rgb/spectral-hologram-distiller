@@ -1,5 +1,19 @@
-# Spectral Hologram Distiller (SHD v3.13.1)
+# Spectral Hologram Distiller (SHD v3.13.2)
 
+> **v3.13.2 (2026-10-24): thread-model for untrusted crystals + archive-handle
+> hygiene.** The loader is the package's boundary with the outside world, and
+> `.hologram.npz` crystals travel by email, pull requests and model
+> marketplaces. On top of ``allow_pickle=False`` (already forbids code
+> execution) the loader now validates the crystal structurally at load time:
+> passport eigvals/eigvecs pairing, crystal_X/Y/weights shapes and finiteness,
+> non-negative gamma weights and X_std, sane n_seen. A poisoned or broken
+> artifact now fails IN THE LOADER with a clear "artifact is inconsistent"
+> error instead of exploding later deep inside a downstream fit; a legacy
+> (pre-3.13.1) crystal keeps loading with its provenance warning. The load
+> path also materialises the payload and closes the archive handle before any
+> validation runs, so a rejected file never leaks a Windows file lock
+> (regressions: ``tests/test_v3132_untrusted_npz.py``).
+>
 > **v3.13.1 (2026-10-24): technical-debt pass from the startup audit — artifact
 > schema contract + one Cholesky factorisation per batch.** Two holes closed,
 > regressions in `tests/test_v3131_schema_and_chol.py`, package version is now
@@ -191,10 +205,10 @@ loader.save("my_crystal_healed.hologram.npz")
 X_g, y_g, w_g = loader.get_training_data(weighting="gamma")    # default
 X_u, y_u, w_u = loader.get_training_data(weighting="uniform")  # critical-only
 
-# v3.13.1: every crystal is versioned — schema + package version travel with
+# v3.13.1+: every crystal is versioned — schema + package version travel with
 # the file; summary() shows them, old crystals warn that their provenance
 # predates the schema contract:
-print(ld.summary()["schema_version"], ld.summary()["shd_version"])  # 1, 3.13.1
+print(ld.summary()["schema_version"], ld.summary()["shd_version"])  # 1, 3.13.2
 ```
 
 ## CLI (`python -m shd` / `shd`)
