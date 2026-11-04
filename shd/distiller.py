@@ -1686,6 +1686,32 @@ class HologramCrystalLoader:
             self.ms_tau_n_windows = None
             self.ms_tau_fa_rate = None
 
+        # Panel radar calibration (v3.14.3): the panel adds MMD (RFF-space) and
+        # energy (raw-space) terms to the BW + mean-shift score and scores one
+        # fused threshold. Persisted like the other calibrations so a
+        # deployment reloads bit-identically. Legacy artifacts and
+        # uncalibrated loaders leave it None, in which case
+        # check_domain_shift(panel=True) falls back to scoring the panel
+        # against the rank-scaled default threshold.
+        if "panel_tau_calibrated" in data:
+            missing = [k for k in ("panel_tau_window", "panel_tau_n_windows", "panel_tau_fa_rate")
+                       if k not in data]
+            if missing:
+                raise ValueError(
+                    "artifact stores panel_tau_calibrated without " + ", ".join(missing)
+                    + "; the panel-radar calibration must travel as one block -- "
+                    "the artifact is inconsistent"
+                )
+            self.panel_tau_calibrated = float(np.asarray(data["panel_tau_calibrated"]).reshape(-1)[0])
+            self.panel_tau_window = int(np.asarray(data["panel_tau_window"]).reshape(-1)[0])
+            self.panel_tau_n_windows = int(np.asarray(data["panel_tau_n_windows"]).reshape(-1)[0])
+            self.panel_tau_fa_rate = float(np.asarray(data["panel_tau_fa_rate"]).reshape(-1)[0])
+        else:
+            self.panel_tau_calibrated = None
+            self.panel_tau_window = None
+            self.panel_tau_n_windows = None
+            self.panel_tau_fa_rate = None
+
         self._prev_row = None  # last raw row of the previous streaming radar call
 
         if "Omega" in data:
@@ -1985,6 +2011,27 @@ class HologramCrystalLoader:
         # is the rank-scaled BW constant -- the mean-shift term rides along.
         return float(BW_ALERT_THRESHOLD * sample_scale * rank_scale)
 
+    def _calibrated_threshold_panel(self, n_batch: int, adaptive_threshold: bool = True) -> float:
+        """Threshold for the PANEL (BW + mean-shift + MMD + energy) score (v3.14.3).
+
+        Mirrors :meth:`_calibrated_threshold`'s finite-sample 1/sqrt(B)
+        scaling on the panel score, using the ``panel_tau_*`` calibration
+        fields when present, else the same default logic as the combined
+        score. The panel terms are not rank-scaled beyond the BW component,
+        so the default follows the rank-scaled BW constant exactly like the
+        combined path.
+        """
+        if not adaptive_threshold:
+            return float(BW_ALERT_THRESHOLD)
+        if self.panel_tau_calibrated is not None:
+            b_eff = max(int(n_batch), 16)
+            w_ref = max(int(self.panel_tau_window), 16)
+            return float(self.panel_tau_calibrated) * max(1.0, float(np.sqrt(float(w_ref) / b_eff)))
+        b_eff = max(int(n_batch), 16)
+        sample_scale = max(1.0, float(np.sqrt(1024.0 / b_eff)))
+        rank_scale = float(np.sqrt(len(self.eigvals) / 32.0))
+        return float(BW_ALERT_THRESHOLD * sample_scale * rank_scale)
+
     def _effective_stream(self, X_stream, remember_prev_row=False, prev_row=None):
         """Raw effective feature matrix for the mean-shift term (v3.13.0).
 
@@ -2081,9 +2128,7 @@ class HologramCrystalLoader:
             # first-batch statistic, in the WRONG space, and it would re-introduce
             # the scale defect v3.13.0 fixed (degenerate first-batch stds on
             # near-constant features).
-            dX = np.zeros_like(self.X)
-            dX[1:] = self.X[1:] - self.X[:-1]
-            ref = np.hstack([self.X, dX])
+            ref = self._mean_shift_reference()
         else:
             ref = self.X
         mu = ref.mean(axis=0)
@@ -2100,6 +2145,7 @@ class HologramCrystalLoader:
         adaptive_threshold: bool = True,
         streaming: bool = False,
         mean_shift: bool = False,
+        panel: bool = False,
     ) -> dict:
         """Compare a new data stream against the spectral passport.
 
@@ -2129,6 +2175,19 @@ class HologramCrystalLoader:
         signatures (leak/phase-change) the BW term misses, so the combined
         score is what a deployment device should alarm on. Default ``False``
         keeps the existing behaviour bit-identical.
+
+        With ``panel=True`` (v3.14.3) the dict also returns a panel of four
+        scores — ``panel_distance`` (= BW + mean-shift + MMD + energy),
+        ``panel_threshold`` / ``panel_threshold_source`` and ``is_shifted`` /
+        ``panel_is_shifted`` / ``panel_shift_evidence``. The panel terms
+        measure distribution discrepancy in four different geometries so a
+        shift visible in none of them is less likely. Default ``False``
+        keeps the existing behaviour bit-identical. ``is_shifted`` follows
+        ``panel_distance > panel_threshold`` when ``panel=True`` (and
+        ``mean_shift=False``); with ``mean_shift=True`` the mean-shift path
+        keeps precedence (``is_shifted`` = combined > combined_threshold and
+        ``panel_is_shifted`` = panel > panel_threshold). Both fields are
+        present so callers can read the verdict of either path.
         """
         # Capture the continuity state BEFORE _bw_distance runs: the BW pass
         # advances self._prev_row to this window's last row, so the mean-shift
@@ -2158,11 +2217,14 @@ class HologramCrystalLoader:
             ),
             "latency_ms": latency_ms,
         }
-        if mean_shift:
-            ms, _ = self._mean_shift_distance(
+        ms = None
+        n_rows_ms = n_rows
+        if panel or mean_shift:
+            ms, n_rows_ms = self._mean_shift_distance(
                 X_new_stream, distiller_ref=distiller_ref,
                 remember_prev_row=streaming, prev_row=prev_row_snapshot
             )
+        if mean_shift:
             combined = float(bw_dist + ms)
             ms_thr = self._calibrated_threshold_ms(n_rows, adaptive_threshold=adaptive_threshold)
             res["mean_shift_distance"] = ms
@@ -2176,6 +2238,36 @@ class HologramCrystalLoader:
             res["is_shifted"] = combined > ms_thr
         else:
             res["is_shifted"] = bw_dist > thr
+        if panel:
+            mmd = self._mmd_distance(
+                X_new_stream, distiller_ref=distiller_ref,
+                remember_prev_row=streaming, prev_row=prev_row_snapshot
+            )
+            energy = self._energy_distance(
+                X_new_stream, distiller_ref=distiller_ref,
+                remember_prev_row=streaming, prev_row=prev_row_snapshot
+            )
+            panel_distance = float(bw_dist + ms + mmd + energy)
+            panel_thr = self._calibrated_threshold_panel(
+                n_rows_ms, adaptive_threshold=adaptive_threshold
+            )
+            res["panel_distance"] = panel_distance
+            res["panel_threshold"] = float(panel_thr)
+            res["panel_threshold_source"] = (
+                "calibrated"
+                if adaptive_threshold and self.panel_tau_calibrated is not None
+                else "default"
+            )
+            res["panel_mmd_distance"] = float(mmd)
+            res["panel_energy_distance"] = float(energy)
+            res["panel_latency_ms"] = (time.perf_counter() - t0) * 1000.0
+            res["panel_shift_evidence"] = bool(panel_distance > panel_thr)
+            res["panel_is_shifted"] = bool(panel_distance > panel_thr)
+            # ``is_shifted`` follows the panel when the caller opted into it
+            # without the mean_shift path; the mean_shift path keeps precedence
+            # so an explicit mean_shift=True caller keeps its existing contract.
+            if not mean_shift:
+                res["is_shifted"] = bool(panel_distance > panel_thr)
         return res
 
     def _bw_distance(self, X_stream, distiller_ref=None, remember_prev_row=False):
@@ -2206,6 +2298,83 @@ class HologramCrystalLoader:
         # which inflated the threshold and made the same point decide
         # differently as (d,) vs (1, d).
         return bw_dist, len(U_new)
+
+    def _mmd_distance(
+        self, X_stream, distiller_ref=None, remember_prev_row=False, prev_row=None
+    ) -> float:
+        """RFF-MMD bias statistic of one window against the medoid cloud (v3.14.3).
+
+        With ``U`` the unit-row-normalized Random Fourier Features of the
+        window and ``U_ref`` the same features of the crystal's stored medoids
+        (``self.X``), returns the squared unbiased MMD estimator
+
+            biassed_MMD^2 = || mean(U) - mean(U_ref) ||^2
+
+        in RFF space. It measures first-moment shift in the Fourier feature
+        space and complements the BW second-moment term: a shift that moves
+        the stream in the spectral space without rotating its covariance is
+        visible here. Shared by ``check_domain_shift(panel=True)`` and the
+        panel calibration so both score windows with bit-identical
+        arithmetic.
+        """
+        _Z_new, U_new = self._prepare_stream(
+            X_stream, distiller_ref=distiller_ref,
+            remember_prev_row=remember_prev_row  # mirror _bw_distance state
+        )
+        # The RFF reference does not follow the mean-shift term's delta-space
+        # augmentation: the medoid cloud is always embedded through _prepare_
+        # stream (raw rows), the same as the BW pass.
+        _Z_ref, U_ref = self._prepare_stream(
+            self.X, distiller_ref=distiller_ref, remember_prev_row=False
+        )
+        mu_new = U_new.mean(axis=0)
+        mu_ref = U_ref.mean(axis=0)
+        return float(np.sum((mu_new - mu_ref) ** 2))
+
+    def _energy_distance(
+        self, X_stream, distiller_ref=None, remember_prev_row=False, prev_row=None
+    ) -> float:
+        """Euclidean energy distance of one window against the medoid cloud (v3.14.3).
+
+        Returns the (biased) energy distance
+
+            2 * mean_{x in W, y in R} ||x - y||_1
+              - mean_{x,x' in W} ||x - x'||_1
+              - mean_{y,y' in R} ||y - y'||_1
+
+        on the RAW effective feature matrix (same space as the mean-shift
+        term, including the delta-space augmentation for delta crystals).
+        Energy distance needs no kernel choice and sees both location and
+        scale shifts in raw space; it complements the spectral terms.
+        Shared by ``check_domain_shift(panel=True)`` and the panel
+        calibration so both score windows with bit-identical arithmetic.
+        """
+        X_eff = self._effective_stream(
+            X_stream, remember_prev_row=remember_prev_row, prev_row=prev_row
+        )
+        ref = self._mean_shift_reference()
+        # Pairwise L1 means; sizes are medoid-count (<= 300) x window rows and
+        # medoid-count x medoid-count, both small by construction.
+        cross = np.mean(np.abs(X_eff[:, None, :] - ref[None, :, :]))
+        within_w = np.mean(np.abs(X_eff[:, None, :] - X_eff[None, :, :]))
+        within_r = np.mean(np.abs(ref[:, None, :] - ref[None, :, :]))
+        return float(2.0 * cross - within_w - within_r)
+
+    def _mean_shift_reference(self) -> np.ndarray:
+        """Reference population for the raw-space mean-shift/energy terms.
+
+        The crystal's stored medoids, in the SAME space as the effective
+        stream: augmented with first differences for delta crystals
+        ``[X || dX]`` (``dX[0] = 0``, ``dX[i] = X[i] - X[i-1]``), raw medoids
+        otherwise. ``_mean_shift_distance`` built this population inline;
+        factored out so the energy term uses bit-identical arithmetic
+        (v3.14.3).
+        """
+        if self.include_deltas:
+            dX = np.zeros_like(self.X)
+            dX[1:] = self.X[1:] - self.X[:-1]
+            return np.hstack([self.X, dX])
+        return self.X
 
     def calibrate_threshold(self, X_ref, *, window: int, fa_rate: float = 0.01) -> dict:
         """Calibrate the radar threshold on healthy reference windows (v3.12.0).
@@ -2325,6 +2494,60 @@ class HologramCrystalLoader:
             "fa_rate": float(fa_rate),
             "combined_median": float(np.median(combined)),
             "combined_max": float(np.max(combined)),
+        }
+
+    def calibrate_threshold_panel(self, X_ref, *, window: int, fa_rate: float = 0.01) -> dict:
+        """Calibrate the panel radar's fused threshold on healthy windows (v3.14.3).
+
+        The panel radar alarms on ``bw + mean_shift + mmd + energy``. Like
+        the mean-shift calibration, the fused score needs its OWN threshold
+        calibrated the same way (``calibrate_threshold``) on HEALTHY windows
+        from the deployment stream, over the same non-overlapping windows.
+        Run this after ``calibrate_threshold`` — the three thresholds share
+        the window size and are persisted (and invalidated) together by
+        ``save()`` / ``heal_domain_shift``.
+
+        Returns a report dict with the fused ``tau``; ``check_domain_shift``
+        picks it up automatically and ``panel_is_shifted`` then reflects the
+        panel score.
+        """
+        X_ref = np.asarray(X_ref, dtype=np.float64)
+        if X_ref.ndim == 1:
+            X_ref = X_ref.reshape(1, -1)
+        if X_ref.ndim != 2:
+            raise ValueError(f"X_ref must be 2-D (rows, features), got shape {X_ref.shape}")
+        window = int(window)
+        if window < 8:
+            raise ValueError(f"window must be >= 8 rows, got {window}")
+        if not 0.0 < float(fa_rate) < 0.5:
+            raise ValueError(f"fa_rate must be in (0, 0.5), got {fa_rate}")
+        n_windows = len(X_ref) // window
+        if n_windows < 10:
+            raise ValueError(
+                f"a {1.0 - float(fa_rate):.0%} quantile needs at least 10 windows of "
+                f"{window} rows; got {n_windows} from {len(X_ref)} rows -- provide at "
+                f"least {10 * window} healthy rows"
+            )
+        panel = np.empty(n_windows, dtype=np.float64)
+        for w_i in range(n_windows):
+            sl = X_ref[w_i * window:(w_i + 1) * window]
+            bw, _ = self._bw_distance(sl)
+            ms, _ = self._mean_shift_distance(sl)
+            mmd = self._mmd_distance(sl)
+            energy = self._energy_distance(sl)
+            panel[w_i] = bw + ms + mmd + energy
+        tau = float(np.quantile(panel, 1.0 - float(fa_rate)))
+        self.panel_tau_calibrated = tau
+        self.panel_tau_window = window
+        self.panel_tau_n_windows = n_windows
+        self.panel_tau_fa_rate = float(fa_rate)
+        return {
+            "tau": tau,
+            "window": window,
+            "n_windows": n_windows,
+            "fa_rate": float(fa_rate),
+            "panel_median": float(np.median(panel)),
+            "panel_max": float(np.max(panel)),
         }
 
     def heal_domain_shift(
@@ -2619,6 +2842,12 @@ class HologramCrystalLoader:
         self.ms_tau_window = None
         self.ms_tau_n_windows = None
         self.ms_tau_fa_rate = None
+        # v3.14.3: the panel calibration is invalidated by the same passport
+        # move; clear it together with the other two thresholds.
+        self.panel_tau_calibrated = None
+        self.panel_tau_window = None
+        self.panel_tau_n_windows = None
+        self.panel_tau_fa_rate = None
 
         after = self.check_domain_shift(X_win, distiller_ref=distiller_ref)
         return {
@@ -2683,6 +2912,13 @@ class HologramCrystalLoader:
             payload["ms_tau_window"] = np.array([int(self.ms_tau_window)], dtype=np.int64)
             payload["ms_tau_n_windows"] = np.array([int(self.ms_tau_n_windows)], dtype=np.int64)
             payload["ms_tau_fa_rate"] = np.array([float(self.ms_tau_fa_rate)], dtype=np.float64)
+        if getattr(self, "panel_tau_calibrated", None) is not None:
+            # v3.14.3: the panel-radar fused-threshold calibration travels
+            # with the crystal the same way.
+            payload["panel_tau_calibrated"] = np.array([float(self.panel_tau_calibrated)], dtype=np.float64)
+            payload["panel_tau_window"] = np.array([int(self.panel_tau_window)], dtype=np.int64)
+            payload["panel_tau_n_windows"] = np.array([int(self.panel_tau_n_windows)], dtype=np.int64)
+            payload["panel_tau_fa_rate"] = np.array([float(self.panel_tau_fa_rate)], dtype=np.float64)
         if self.Omega is not None and self.phase is not None:
             payload["Omega"] = self.Omega.astype(np.float32)
             payload["phase"] = self.phase.astype(np.float32)
@@ -2707,6 +2943,7 @@ class HologramCrystalLoader:
             "include_deltas": bool(self.include_deltas),
             "has_projector": bool(self.Omega is not None),
             "mean_shift_calibrated": bool(getattr(self, "ms_tau_calibrated", None) is not None),
+            "panel_calibrated": bool(getattr(self, "panel_tau_calibrated", None) is not None),
             "passport_reference": self.passport_reference,
             "n_unlabelled": int(np.sum(~self.y_labelled)),
             "y_min": float(np.min(self.y)),

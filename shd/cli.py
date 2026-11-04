@@ -131,7 +131,9 @@ def cmd_radar(args: argparse.Namespace) -> int:
         args.crystal, include_deltas=True if args.include_deltas else None
     )
     X, _ = _load_tabular(args.input, target_col=args.target_col)
-    report = loader.check_domain_shift(X, streaming=args.streaming)
+    report = loader.check_domain_shift(
+        X, streaming=args.streaming, mean_shift=args.mean_shift, panel=args.panel
+    )
     print(json.dumps(report, indent=2))
     return 0
 
@@ -226,6 +228,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_rad.add_argument(
         "--streaming", action="store_true",
         help="Delta crystals: continue first differences from the previous radar call",
+    )
+    p_rad.add_argument(
+        "--mean-shift", action="store_true",
+        help="Also score the combined BW + mean-shift radar (v3.13.0)",
+    )
+    p_rad.add_argument(
+        "--panel", action="store_true",
+        help="Also score the panel (BW + mean-shift + MMD + energy) radar (v3.14.3)",
     )
     p_rad.add_argument(
         "--include-deltas", action="store_true",

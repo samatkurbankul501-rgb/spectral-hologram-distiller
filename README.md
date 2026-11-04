@@ -1120,4 +1120,8 @@ when global fit still matters.
   stores a per-deployment quantile of the radar's own distances over healthy
   windows (persisted by `save()`, invalidated by `heal_domain_shift`);
   otherwise re-check the radar's in-distribution false-alarm rate on your own
-  data.
+  data. The **panel radar** (`check_domain_shift(..., panel=True)`,
+  `calibrate_threshold_panel`, v3.14.3) extends the same quantile discipline
+  to the fused BW + mean-shift + MMD + energy score — calibrate it the same
+  way on healthy windows from the deployment stream, sharing the window size
+  with `calibrate_threshold` / `calibrate_threshold_ms`.
