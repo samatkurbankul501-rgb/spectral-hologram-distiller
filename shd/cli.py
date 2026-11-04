@@ -92,6 +92,45 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_migrate(args: argparse.Namespace) -> int:
+    """Re-save a legacy crystal with the current schema (v3.14.3).
+
+    Loads the legacy artifact, then saves it with the current loader
+    format (schema_version present, projector optional). The migrated
+    artifact is bit-compatible with older loaders via the schema-1
+    contract, but newer fields (schema_version, shd_version) travel with
+    the file. Used for artifacts like superconduct_v37.hologram.npz that
+    predate schema_version.
+    """
+    loader = HologramCrystalLoader(
+        args.crystal, include_deltas=True if args.include_deltas else None
+    )
+    before = loader.summary()
+    # Loader.save() persists the current crystals; optional projector is
+    # kept if present (otherwise migration still yields a versioned file).
+    size_kb = loader.save(args.output)
+    after = HologramCrystalLoader(args.output).summary()
+    out = {
+        "input": args.crystal,
+        "output": args.output,
+        "file_size_kb": round(float(size_kb), 2),
+        "before": {
+            "schema_version": before["schema_version"],
+            "shd_version": before["shd_version"],
+            "n_medoids": before["n_medoids"],
+            "has_projector": before["has_projector"],
+        },
+        "after": {
+            "schema_version": after["schema_version"],
+            "shd_version": after["shd_version"],
+            "n_medoids": after["n_medoids"],
+            "has_projector": after["has_projector"],
+        },
+    }
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def cmd_distill(args: argparse.Namespace) -> int:
     X, y = _load_tabular(args.input, target_col=args.target_col)
     distiller = SpectralHologramDistiller(
@@ -260,6 +299,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_heal.add_argument("--seed", type=int, default=42)
     p_heal.set_defaults(func=cmd_heal)
+
+    p_mig = sub.add_parser("migrate", help="Re-save a legacy crystal with the current schema (v3.14.3)")
+    p_mig.add_argument("--crystal", "-c", required=True, help="Legacy .hologram.npz path")
+    p_mig.add_argument("--output", "-o", required=True, help="Migrated .hologram.npz path")
+    p_mig.add_argument(
+        "--include-deltas", action="store_true",
+        help="Treat a legacy (pre-3.9.1) artifact as a delta crystal",
+    )
+    p_mig.set_defaults(func=cmd_migrate)
 
     return p
 

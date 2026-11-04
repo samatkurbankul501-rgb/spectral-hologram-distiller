@@ -393,7 +393,9 @@ check("preset sparse_stream params",
 check("preset global_first params",
       1 if _shd.apply_preset("global_first") == {
           "high_band_ratio": 0.26, "tail_quantile": 84.0} else 0, 1, 0)
-check("preset count", len(_shd.PRESETS), 5, 0)
+check("preset pm25_global params",
+      1 if _shd.apply_preset("pm25_global") == {"global_guard": True} else 0, 1, 0)
+check("preset count", len(_shd.PRESETS), 6, 0)
 portfolio_src = (ROOT / "shd" / "portfolio.py").read_text(encoding="utf-8")
 check_text("gate solver budget 5000", "max_iter=5000", portfolio_src)
 check_text("gate solver fallback recorded", "gate_solver_", portfolio_src)

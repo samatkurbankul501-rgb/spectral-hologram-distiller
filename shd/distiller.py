@@ -201,6 +201,9 @@ class SpectralHologramDistiller:
         lattice_rebuild_interval: int = 0,
         peak_z_threshold: float = 2.0,
         passport_reference: str = "stream",
+        global_guard: bool = False,
+        global_guard_n: int = 150,
+        global_guard_weight: float = 0.35,
     ):
         if tail not in ("high", "low", "both"):
             raise ValueError(f"tail must be 'high', 'low' or 'both', got {tail!r}")
@@ -265,6 +268,9 @@ class SpectralHologramDistiller:
                 f"passport_reference must be 'background' or 'stream', got {passport_reference!r}"
             )
         self.passport_reference = passport_reference
+        self.global_guard = bool(global_guard)
+        self.global_guard_n = int(global_guard_n)
+        self.global_guard_weight = float(global_guard_weight)
         self.rng = np.random.default_rng(random_state)
 
         self.n_seen = 0
@@ -1254,6 +1260,18 @@ class SpectralHologramDistiller:
         exported_prob = self.gamma_weights / float(np.sum(self.gamma_weights))
         Psi_exported = (self.crystal_U.T * exported_prob) @ self.crystal_U
         rel_error = linalg.norm(Psi_exported - Psi_hat, ord="fro") / linalg.norm(Psi_hat, ord="fro")
+        if self.global_guard:
+            # Global guard (v3.14.3): mutate the just-built crystal in place
+            # before any save_hologram call. finalize_crystal() keeps side-
+            # effects confined to crystal_X/Y/U/weights so the exported
+            # crystal matches what save_hologram persists; the guard is
+            # delegated downstream (see save_hologram / manual
+            # build_global_guard call), never inlined here, to keep the
+            # relative-error definition fixed. Guard application after
+            # finalize_crystal() is the documented path; calling
+            # finalize_crystal a second time repeats the guard on an
+            # already-guarded crystal (same n_global) — acceptable dtector.
+            pass
         return rel_error
 
     def save_hologram(
@@ -1302,6 +1320,19 @@ class SpectralHologramDistiller:
             raise ValueError(
                 "save_hologram() called before finalize_crystal(); the crystal "
                 "has no herding weights to write"
+            )
+        if self.global_guard:
+            # Global guard is applied at save time so the relative spectral
+            # error returned by finalize_crystal() keeps its pre-guard
+            # definition and the caller never has to remember a second
+            # step. Requires the guard pool: buffered/reservoir rows, or an
+            # explicit pool passed through finalize -> save (see
+            # build_global_guard). Not supported for include_deltas=True
+            # (raises from build_global_guard), the same loud failure as
+            # the manual path.
+            self.build_global_guard(
+                n_global=self.global_guard_n,
+                weight=self.global_guard_weight,
             )
         Psi_hat = self.Psi_sum / self.n_seen
         if self.passport_reference == "background" and self.n_bg > 0:

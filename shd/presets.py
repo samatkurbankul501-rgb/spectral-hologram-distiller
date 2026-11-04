@@ -42,6 +42,18 @@ PRESETS: dict[str, dict[str, Any]] = {
                   "spelled out for explicit configs",
         "explicit_defaults": True,
     },
+    "pm25_global": {
+        "params": {
+            "global_guard": True,
+        },
+        "source": "README §10 Known limitations / bench_pm25_rehab: without "
+                  "the guard SHD loses global regression to K-Means (+6.9% "
+                  "KRR-all p=4.8e-4); the guard (default n_global=150, weight=0.35) "
+                  "swaps the 150 lowest-weight rows for K-Means global medoids "
+                  "and wins BOTH all/crit 5/5 without hurting crit. PM2.5 global "
+                  "without guard = negative result; ship the guard or call it "
+                  "rare-episode monitoring.",
+    },
     "balanced": {
         "params": {"high_band_ratio": 0.50},
         "source": "README section 6: reactor crit -26.9% vs equal-budget "
