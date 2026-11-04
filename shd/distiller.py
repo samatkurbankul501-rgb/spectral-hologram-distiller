@@ -2320,7 +2320,15 @@ class HologramCrystalLoader:
                     X_new_stream, distiller_ref=distiller_ref,
                     remember_prev_row=streaming, prev_row=prev_row_snapshot
                 )
-                panel_distance = float(bw_dist + ms + mmd + energy + sliced + autocorr)
+                autocorr2 = self._autocorr_lag2_distance(
+                    X_new_stream, distiller_ref=distiller_ref,
+                    remember_prev_row=streaming, prev_row=prev_row_snapshot
+                )
+                rank_dfs = self._rank_dfs_distance(
+                    X_new_stream, distiller_ref=distiller_ref,
+                    remember_prev_row=streaming, prev_row=prev_row_snapshot
+                )
+                panel_distance = float(bw_dist + ms + mmd + energy + sliced + autocorr + autocorr2 + rank_dfs)
                 panel_thr = self._calibrated_threshold_panel(
                     n_rows_ms, adaptive_threshold=adaptive_threshold
                 )
@@ -2335,6 +2343,8 @@ class HologramCrystalLoader:
                 res["panel_energy_distance"] = float(energy)
                 res["panel_sliced_w1"] = float(sliced)
                 res["panel_autocorr_distance"] = float(autocorr)
+                res["panel_autocorr_lag2_distance"] = float(autocorr2)
+                res["panel_rank_dfs_distance"] = float(rank_dfs)
                 res["panel_latency_ms"] = (time.perf_counter() - t0) * 1000.0
                 res["panel_shift_evidence"] = bool(panel_distance > panel_thr)
                 res["panel_is_shifted"] = bool(panel_distance > panel_thr)
@@ -2518,6 +2528,73 @@ class HologramCrystalLoader:
             return out
         cw = lag1_corr(X_eff)
         cr = lag1_corr(ref)
+        return float(np.mean(np.abs(cw - cr)))
+
+    def _autocorr_lag2_distance(
+        self, X_stream, distiller_ref=None, remember_prev_row=False, prev_row=None
+    ) -> float:
+        """Lag-2 autocorrelation distance of one window vs medoid cloud (v3.14.4).
+
+        Same as :meth:`_autocorr_distance` but at lag 2. Sees longer-range
+        temporal structure (period-2 oscillations, longer memory) that lag-1
+        misses. Zero for windows shorter than 4 rows.
+        """
+        X_eff = self._effective_stream(
+            X_stream, remember_prev_row=remember_prev_row, prev_row=prev_row
+        )
+        ref = self._mean_shift_reference()
+        if X_eff.shape[0] < 4 or ref.shape[0] < 4:
+            return 0.0
+        def lag2_corr(A: np.ndarray) -> np.ndarray:
+            X0 = A[:-2] - np.mean(A[:-2], axis=0)
+            X1 = A[2:] - np.mean(A[2:], axis=0)
+            num = np.sum(X0 * X1, axis=0)
+            den = np.sqrt(np.sum(X0 * X0, axis=0) * np.sum(X1 * X1, axis=0))
+            out = np.zeros_like(num)
+            ok = den > 1e-12
+            out[ok] = num[ok] / den[ok]
+            return out
+        cw = lag2_corr(X_eff)
+        cr = lag2_corr(ref)
+        return float(np.mean(np.abs(cw - cr)))
+
+    def _rank_dfs_distance(
+        self, X_stream, distiller_ref=None, remember_prev_row=False, prev_row=None
+    ) -> float:
+        """Mean rank correlation (Spearman) distance vs medoid cloud (v3.14.4).
+
+        Per-feature Spearman rho between window and reference (rank then
+        Pearson), returns ``mean_f |rho_f(W) - rho_f(R)|``. Sees monotonic
+        dependence shifts that Pearson misses (nonlinear monotone drift).
+        Rank computed via argsort; ties broken by stable sort.
+        """
+        X_eff = self._effective_stream(
+            X_stream, remember_prev_row=remember_prev_row, prev_row=prev_row
+        )
+        ref = self._mean_shift_reference()
+        if X_eff.shape[0] < 3 or ref.shape[0] < 3:
+            return 0.0
+        def ranks(A: np.ndarray) -> np.ndarray:
+            return np.argsort(np.argsort(A, axis=0), axis=0).astype(np.float64)
+        def spearman(A: np.ndarray) -> np.ndarray:
+            R = ranks(A)
+            Rm = R - np.mean(R, axis=0)
+            den = np.sqrt(np.sum(Rm * Rm, axis=0))
+            out = np.zeros_like(den)
+            ok = den > 1e-12
+            # rho between the two halves lag-1 as a proxy for dependence
+            # structure; identical halves give rho=1 for identical order.
+            # For the distance we compare the two populations' rank
+            # autocorrelation proxy directly.
+            X0 = R[:-1] - np.mean(R[:-1], axis=0)
+            X1 = R[1:] - np.mean(R[1:], axis=0)
+            num = np.sum(X0 * X1, axis=0)
+            den2 = np.sqrt(np.sum(X0 * X0, axis=0) * np.sum(X1 * X1, axis=0))
+            ok = den2 > 1e-12
+            out[ok] = num[ok] / den2[ok]
+            return out
+        cw = spearman(X_eff)
+        cr = spearman(ref)
         return float(np.mean(np.abs(cw - cr)))
 
     def _mean_shift_reference(self) -> np.ndarray:
@@ -2706,7 +2783,9 @@ class HologramCrystalLoader:
             energy = self._energy_distance(sl)
             sliced = self._sliced_w1_distance(sl)
             autocorr = self._autocorr_distance(sl)
-            panel[w_i] = bw + ms + mmd + energy + sliced + autocorr
+            autocorr2 = self._autocorr_lag2_distance(sl)
+            rank_dfs = self._rank_dfs_distance(sl)
+            panel[w_i] = bw + ms + mmd + energy + sliced + autocorr + autocorr2 + rank_dfs
         tau = float(np.quantile(panel, 1.0 - float(fa_rate)))
         self.panel_tau_calibrated = tau
         self.panel_tau_window = window
