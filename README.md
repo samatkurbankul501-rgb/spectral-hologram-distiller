@@ -312,6 +312,11 @@ python -m shd radar --crystal crystal.hologram.npz --input new_batch.csv --targe
 python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-col -1 --output healed.hologram.npz
 # ...with a hard cap on total crystal size (prunes low-weight background only):
 python -m shd heal --crystal crystal.hologram.npz --input drifted.csv --target-col -1 --output healed.hologram.npz --max-crystal-size 220
+
+# Migrate a legacy artifact (pre-3.13.1, no schema_version) to the current format.
+# Loads the legacy file, re-saves with schema_version + shd_version; medoids and
+# passport survive bit-for-bit. The input is never overwritten.
+python -m shd migrate -c old.hologram.npz -o migrated.hologram.npz
 ```
 
 ## Pipeline
@@ -1125,3 +1130,12 @@ when global fit still matters.
   to the fused BW + mean-shift + MMD + energy score — calibrate it the same
   way on healthy windows from the deployment stream, sharing the window size
   with `calibrate_threshold` / `calibrate_threshold_ms`.
+- **250k×100 dim scaling (+ honest throughput cost).** Synthetic probe
+  (`bench_stress250k_results.json`, 225k train / 25k hold-out, d=100): SHD
+  fit 28.6 с (MiniBatchKMeans 5.14 с, ~5.6×), finalize 0.08 с, peak 71.7 МБ,
+  кристалл 300, артефакт 225.2 КБ, rel_err 0.3468, panel-radar 64 rows
+  117.7 мс (MBK predict 0.74 мс, ~160×). SHD не чемпион по throughput — он
+  дороже по фиту и предсказанию, но держит параметр budget + паспорт +
+  радар; выигрыш — в критических режимах и сдвигах, а не в throughput.
+  Kernel Thinning на 250k×100dim (O(n²) batch) не мерялся здесь — поле
+  движется к near-linear COMPRESS-вариантам.

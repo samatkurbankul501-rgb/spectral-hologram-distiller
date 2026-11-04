@@ -1,0 +1,11 @@
+{
+  "n": 250000,
+  "d": 100,
+  "n_train": 225000,
+  "shd_fit_s": 28.6,
+  "shd_finalize_s": 0.08,
+  "shd_rel_error": 0.3468,
+  "shd_peak_mb": 71.7,
+  "shd_artifact_kb": 225.2,
+  "shd_panel_radar_ms": 117.71
+}
