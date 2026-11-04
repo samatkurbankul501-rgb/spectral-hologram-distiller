@@ -823,6 +823,12 @@ class SpectralHologramDistiller:
         n_global = int(n_global)
         if n_global <= 0:
             return {"swapped": 0, "n_pool": 0, "note": "n_global <= 0: no-op"}
+        if n_global > int(len(self.crystal_X)):
+            raise ValueError(
+                f"n_global={n_global} exceeds crystal size "
+                f"{int(len(self.crystal_X))}; cannot swap more rows than the "
+                "crystal holds"
+            )
         weight = float(weight)
         if not 0.0 <= weight <= 1.0:
             raise ValueError(f"weight must be in [0, 1], got {weight}")
