@@ -1,4 +1,4 @@
-"""Command-line interface for Spectral Hologram Distiller (SHD v3.11.1).
+"""Command-line interface for Spectral Hologram Distiller (SHD).
 
 Usage examples:
     python -m shd inspect artifacts/superconduct_v37.hologram.npz
@@ -150,7 +150,16 @@ def cmd_heal(args: argparse.Namespace) -> int:
         random_state=args.seed,
         streaming=args.streaming,
     )
-    out_path = args.output or args.crystal
+    if args.output:
+        out_path = args.output
+    else:
+        # v3.14.2 non-destructive default: never overwrite the input crystal.
+        # c.hologram.npz -> c_healed.hologram.npz; c.npz -> c_healed.npz
+        base, ext = os.path.splitext(args.crystal)
+        if base.endswith(".hologram"):
+            out_path = base[: -len(".hologram")] + "_healed.hologram" + ext
+        else:
+            out_path = base + "_healed" + ext
     if res["healed"]:
         size_kb = loader.save(out_path)
         res["output"] = out_path
@@ -163,7 +172,7 @@ def cmd_heal(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="shd", description="Spectral Hologram Distiller (SHD v3.11.1) CLI")
+    p = argparse.ArgumentParser(prog="shd", description="Spectral Hologram Distiller (SHD) CLI")
     sub = p.add_subparsers(dest="command", required=True)
 
     p_ins = sub.add_parser("inspect", help="Inspect a .hologram.npz crystal")
@@ -227,7 +236,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_heal = sub.add_parser("heal", help="Surgically inject new Voronoi medoids on domain shift")
     p_heal.add_argument("--crystal", "-c", required=True, help="Path to .hologram.npz file")
     p_heal.add_argument("--input", "-i", required=True, help="Drifted stream CSV/NPY/NPZ path")
-    p_heal.add_argument("--output", "-o", default=None, help="Output .hologram.npz path (default: overwrite crystal)")
+    p_heal.add_argument("--output", "-o", default=None,
+                        help="Output .hologram.npz path (default: <crystal>_healed.hologram.npz "
+                             "next to the input; the input crystal is never overwritten)")
     p_heal.add_argument("--target-col", type=int, default=None, help="Target column index (omit for label-free)")
     p_heal.add_argument("--n-inject", type=int, default=35)
     p_heal.add_argument("--max-crystal-size", type=int, default=None, help="Cap total crystal size by pruning low-weight background medoids")

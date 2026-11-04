@@ -16,7 +16,9 @@ same drift compensation -- the comparison is the score, not the plumbing):
                 check_domain_shift(mean_shift=True) scores every contiguous
                 window (bw_distance + mean_shift_distance) and alarms under
                 the same FA budget replay. This is the library path behind
-                the 4/4 leak detection (FA 0.000/month vs budget 1.0).
+                the 4/4 leak detection (FA 0.697/month vs budget 1.0;
+                leads 131.3/393.4/436.4/0.0 h -- leak #4 alerted only
+                after onset, hence zero lead).
                 (tools/proto_metro_bw.py validated it first; v3.13.0 moved
                 it into the loader).
   iforest_detrend : IsolationForest on healthy minutes, mean window anomaly

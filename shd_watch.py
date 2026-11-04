@@ -546,7 +546,8 @@ def main(argv=None):
                        for a, b, p in eps],
         }
         if args.incidents:
-            incidents = json.load(open(args.incidents, encoding="utf-8"))
+            with open(args.incidents, encoding="utf-8") as fh:
+                incidents = json.load(fh)
             report["incidents"] = lead_time_report(incidents, eps)
         print(json.dumps(report, indent=1))
 

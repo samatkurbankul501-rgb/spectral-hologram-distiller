@@ -57,6 +57,7 @@ from shd import SpectralHologramDistiller
 URL = ("https://archive.ics.uci.edu/static/public/421/"
        "aps+failure+at+scania+trucks.zip")
 FN_COST, FP_COST = 10, 1
+LOGIT_C_GRID = (0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0)
 
 
 def _read_member(zf, suffix):
@@ -158,33 +159,55 @@ def build_shd(X_tr, y_tr, seed, m, batch=2500):
             d.gamma_weights)
 
 
-def fit_score(Xc, yc, wc, X_fit, X_eval, model="hgb", scaler=None):
-    """Train on the coreset, return scores on X_fit and X_eval.
+def fit_score(Xc, yc, wc, X_fit, X_eval, model="hgb", scaler=None,
+              y_val=None, c_grid=None, fn_cost=FN_COST, fp_cost=FP_COST):
+    """Train on the coreset, return scores on X_fit and X_eval (+ tuned C).
 
     Two very different learners are reported so the conclusion does not hinge on
     one model family: HGB (axis-aligned trees, handles the 170 raw-scale features
     directly) and a balanced linear model on standardized features. Both use the
     same coreset and the same threshold-selection protocol.
+
+    When ``c_grid`` is given (logit only), the inverse regularisation C is
+    selected on ``X_fit``/``y_val`` by validation cost -- the same
+    model-selection slice the decision threshold uses. The third return value
+    is the chosen C (None when not tuning). Motivation (v3.14.1 probe): an
+    untuned C=1.0 was the root cause of the historical SHD+logit failure --
+    val AUC 0.831 on a crystal whose HGB reaches 0.977; tuned C (0.01 in
+    every seed) restores 0.974, i.e. the crystal was never the bottleneck.
     """
     if len(np.unique(yc)) < 2:                    # degenerate coreset: all one class
         const = float(yc.mean()) if len(yc) else 0.0
-        return np.full(len(X_fit), const), np.full(len(X_eval), const)
+        return np.full(len(X_fit), const), np.full(len(X_eval), const), None
 
     if model == "logit":
         from sklearn.linear_model import LogisticRegression
         Zc = scaler.transform(Xc)
+        if c_grid:
+            best = None
+            for c_val in c_grid:
+                clf = LogisticRegression(
+                    max_iter=5000, class_weight="balanced", C=float(c_val))
+                clf.fit(Zc, yc, sample_weight=wc)
+                sc_val = clf.predict_proba(scaler.transform(X_fit))[:, 1]
+                _, cost = pick_threshold(sc_val, y_val, fn_cost, fp_cost)
+                if best is None or cost < best[1]:
+                    best = (float(c_val), cost, clf)
+            return (best[2].predict_proba(scaler.transform(X_fit))[:, 1],
+                    best[2].predict_proba(scaler.transform(X_eval))[:, 1],
+                    best[0])
         clf = LogisticRegression(max_iter=2000, class_weight="balanced", C=1.0)
         clf.fit(Zc, yc, sample_weight=wc)
         return (clf.predict_proba(scaler.transform(X_fit))[:, 1],
-                clf.predict_proba(scaler.transform(X_eval))[:, 1])
+                clf.predict_proba(scaler.transform(X_eval))[:, 1], None)
 
     clf = HistGradientBoostingClassifier(
         max_iter=120, max_leaf_nodes=20, min_samples_leaf=5, random_state=42)
     clf.fit(Xc, yc, sample_weight=wc)
-    return clf.predict_proba(X_fit)[:, 1], clf.predict_proba(X_eval)[:, 1]
+    return (clf.predict_proba(X_fit)[:, 1], clf.predict_proba(X_eval)[:, 1], None)
 
 
-def run(seeds, m=300, fn_cost=FN_COST, fp_cost=FP_COST):
+def run(seeds, m=300, fn_cost=FN_COST, fp_cost=FP_COST, c_grid=None):
     X_tr, y_tr, X_te, y_te, _ = load_scania()
     print("Scania APS: train={:,} (pos {:.2%})  test={:,} (pos {:.2%})  d={}".format(
         len(X_tr), y_tr.mean(), len(X_te), y_te.mean(), X_tr.shape[1]), flush=True)
@@ -212,8 +235,9 @@ def run(seeds, m=300, fn_cost=FN_COST, fp_cost=FP_COST):
     oracle = {}
     never = evaluate(np.zeros(len(y_te)), y_te, 1.0, fn_cost, fp_cost)
     for model in models:
-        sc_val, sc_te = fit_score(X_fit, y_fit, None, X_val, X_te,
-                                  model=model, scaler=scaler_all)
+        sc_val, sc_te, _ = fit_score(X_fit, y_fit, None, X_val, X_te,
+                                     model=model, scaler=scaler_all, y_val=y_val,
+                                     c_grid=c_grid, fn_cost=fn_cost, fp_cost=fp_cost)
         thr, _ = pick_threshold(sc_val, y_val, fn_cost, fp_cost)
         oracle[model] = evaluate(sc_te, y_te, thr, fn_cost, fp_cost)
 
@@ -229,11 +253,14 @@ def run(seeds, m=300, fn_cost=FN_COST, fp_cost=FP_COST):
             else:
                 Xc, yc, wc = build_shd(X_fit, y_fit, seed, m)
             for model in models:
-                sc_val, sc_te = fit_score(Xc, yc, wc, X_val, X_te,
-                                          model=model, scaler=scaler_all)
+                sc_val, sc_te, best_c = fit_score(
+                    Xc, yc, wc, X_val, X_te, model=model, scaler=scaler_all,
+                    y_val=y_val, c_grid=c_grid, fn_cost=fn_cost, fp_cost=fp_cost)
                 thr, _ = pick_threshold(sc_val, y_val, fn_cost, fp_cost)
                 rec["{}_{}".format(arm, model)] = evaluate(sc_te, y_te, thr,
                                                           fn_cost, fp_cost)
+                if best_c is not None:
+                    rec["bestC_{}_{}".format(arm, model)] = best_c
             rec["pos_" + arm] = int(yc.sum())
         records.append(rec)
         print("  seed {:2d}: cost(hgb) random={:6d} kmeans={:6d} shd={:6d} | "
@@ -243,6 +270,10 @@ def run(seeds, m=300, fn_cost=FN_COST, fp_cost=FP_COST):
                   rec["random_logit"]["cost"], rec["kmeans_logit"]["cost"], rec["shd_logit"]["cost"],
                   rec["pos_random"], rec["pos_kmeans"],
                   rec["pos_shd"]), flush=True)
+        if c_grid:
+            print("           tuned C: r={} k={} s={}".format(
+                rec.get("bestC_random_logit"), rec.get("bestC_kmeans_logit"),
+                rec.get("bestC_shd_logit")), flush=True)
 
     med = lambda key, k: float(np.median([r[key][k] for r in records]))
     med_scalar = lambda key: float(np.median([r[key] for r in records]))
@@ -267,6 +298,7 @@ def run(seeds, m=300, fn_cost=FN_COST, fp_cost=FP_COST):
         "pos_rate_train": float(y_fit.mean()), "pos_rate_test": float(y_te.mean()),
         "cost_model": {"fn": int(fn_cost), "fp": int(fp_cost)},
         "models": models,
+        "logit_c_grid": list(c_grid) if c_grid else None,
         "oracle_fulltrain": oracle, "never_alert": never,
         "summary": {
             "{}_{}".format(arm, model): {
@@ -291,8 +323,13 @@ def main():
     ap.add_argument("--fp-cost", type=int, default=FP_COST,
                     help="cost of a false alarm (default %(default)s; official UCI metric uses 10)")
     ap.add_argument("--output", default="bench_scania_cost_results.json")
+    ap.add_argument("--tune-logit-c", action="store_true",
+                    help="select the logit inverse regularisation C on the "
+                         "validation slice by cost (default off: the "
+                         "historical untuned C=1.0 protocol)")
     args = ap.parse_args()
-    res = run(args.seeds, args.m, fn_cost=args.fn_cost, fp_cost=args.fp_cost)
+    res = run(args.seeds, args.m, fn_cost=args.fn_cost, fp_cost=args.fp_cost,
+              c_grid=LOGIT_C_GRID if args.tune_logit_c else None)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
 

@@ -61,11 +61,15 @@ class CoresetPortfolio:
     gate_C
         Inverse L2 regularisation of the logistic stacker. 1.0 is
         deliberately conservative: the gate must stay smooth, not confident.
+        On the superconductivity gate (600 rows, ~84 feature columns) lbfgs
+        needs >2000 iterations, so the stacker is fit on a dedicated
+        solver (see the Notes) with ``max_iter=5000``; convergence is
+        verified via ``n_iter_``, not by watching for warnings.
     emergency_band
         If the CRITICAL expert's own prediction is within ``emergency_band``
         (in target units) of the alarm threshold, or above it, the critical
         weight is floored at 1.0 -- alarm priority. ``None`` disables the
-        override. Defaults to half the training IQR/10 (a few K on SC-like
+        override. Defaults to the training IQR/10 (a few K on SC-like
         targets); pass an explicit value to pin the behaviour.
     n_folds
         Folds of the out-of-fold stack. 5 leaves 60 held-out rows per fold on
@@ -78,6 +82,14 @@ class CoresetPortfolio:
     portfolio numbers are directly comparable with the harness numbers. The
     gate is learned on the coresets' own rows (label 1 = critical arm), so
     it generalises to any (critical, global) pair of coresets.
+
+    The stacker runs ``lbfgs`` with ``max_iter=5000`` (the committed
+    v3.14.0 artifacts were produced with the same solver at 2000, so every
+    fit that converged within 2000 iterations is bit-identical to them).
+    Convergence is verified via ``n_iter_`` -- not by watching for
+    warnings; an exhausted budget (the path that used to emit
+    ``ConvergenceWarning`` at 2000) triggers one deterministic
+    ``liblinear`` refit, recorded in ``gate_solver_``.
     """
 
     def __init__(
@@ -148,7 +160,7 @@ class CoresetPortfolio:
         self.oof_crit_ = self._oof(Zc, yc, wc, kfold)
         self.oof_glob_ = self._oof(Zg, yg, wg, kfold)
 
-        # Emergency band default: half the pooled IQR / 10 -- a few K on
+        # Emergency band default: the pooled IQR / 10 -- a few K on
         # SC-like targets, without hardcoding dataset scales.
         if self.emergency_band is None:
             pooled = np.concatenate([yc, yg])
@@ -169,13 +181,33 @@ class CoresetPortfolio:
             self._gate_design(self.oof_glob_, self.krr_crit_.predict(Zg), Zg),
         ])
         src = np.concatenate([np.ones(len(Zc)), np.zeros(len(Zg))])
-        self.gate_ = LogisticRegression(C=self.gate_C, max_iter=2000)
+        # Stacker solver: lbfgs, the solver the committed v3.14.0 artifacts
+        # were produced with (fits converging within 2000 iterations are
+        # bit-identical to them). max_iter is raised 2000 -> 5000: the
+        # superconductivity gate (600 rows x ~84 columns) was measured
+        # exhausting the old budget (1228+ iterations, emitting
+        # ConvergenceWarning). Convergence is checked via n_iter_, not by
+        # parsing warnings; an exhausted budget triggers ONE deterministic
+        # liblinear refit (coordinate descent, hard iteration cap),
+        # recorded in gate_solver_.
+        self.gate_ = LogisticRegression(
+            C=self.gate_C, max_iter=5000, solver="lbfgs", random_state=42
+        )
         self.gate_.fit(D, src)
+        n_iter = int(np.ravel(self.gate_.n_iter_)[0])
+        if n_iter >= self.gate_.max_iter:
+            self.gate_ = LogisticRegression(
+                C=self.gate_C, max_iter=5000, solver="liblinear", random_state=42
+            )
+            self.gate_.fit(D, src)
+            self.gate_solver_ = "liblinear"
+        else:
+            self.gate_solver_ = "lbfgs"
+        self.gate_n_iter_ = n_iter
 
         pooled = np.concatenate([yc, yg])
         self.y_mu_ = float(np.mean(pooled))
         self.y_sd_ = float(np.std(pooled)) or 1.0
-        self._th_n_ = (self.critical_threshold - self.y_mu_) / self.y_sd_
         self.scaler_ = scaler
         self._fitted = True
         return self
@@ -236,13 +268,11 @@ class CoresetPortfolio:
         Z = self.scaler_.transform(X)
         return self.krr_crit_.predict(Z), self.krr_glob_.predict(Z)
 
-    def predict(self, X_new: np.ndarray, streaming: bool = False) -> np.ndarray:
+    def predict(self, X_new: np.ndarray) -> np.ndarray:
         """Soft-gated prediction ``w*p_crit + (1-w)*p_glob``.
 
         The gate reads both experts' KRR predictions (one matrix product
-        each) plus the |gap| feature; ``streaming=True`` treats rows as
-        independent windows (no cross-row state), matching the loader's
-        ``check_domain_shift`` semantics.
+        each) plus the |gap| feature.
         """
         p_c, p_g = self.expert_predictions(X_new)
         w = self.gate_weights(X_new)

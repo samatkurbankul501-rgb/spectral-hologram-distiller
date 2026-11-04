@@ -197,7 +197,28 @@ def run(dataset, seeds, checkpoint_path):
     return out
 
 
+def _sync_seed_meta(out):
+    """Recompute n_seeds/seeds from the ACTUAL records before every write.
+
+    CHECKPOINT-RESUME FIX: the header used to be stamped only when the output
+    file was first created, so a resumed run appended records while the header
+    kept its stale value. DISCLOSURE: the committed
+    `bench_portfolio_pm25_results.json` was written by that old code and
+    carries an outdated header (n_seeds=2, seeds=[0,1]) over 20 real records;
+    its records/summary/wilcoxon are valid (p-values are multiples of 2^-19,
+    i.e. computed from all 20 seeds) -- only the header is stale. The artifact
+    is NOT rewritten by this fix; the next full run regenerates it.
+    """
+    rec_seeds = sorted({int(r["seed"]) for r in out.get("records", [])})
+    out["n_seeds"] = len(rec_seeds)
+    out["seeds"] = rec_seeds
+
+
 def _save(path, out):
+    # Metadata is re-derived from the actual records before EVERY save (both
+    # the per-seed checkpoint and the final write), so a resumed run can never
+    # persist a header that disagrees with the records it contains.
+    _sync_seed_meta(out)
     tmp = path + ".part"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)

@@ -307,7 +307,7 @@ for needle in [
     check_absent("paper stale " + needle, needle)
 
 for text in [
-    "# Spectral Hologram Distiller (SHD v3.14.0)",
+    "# Spectral Hologram Distiller (SHD v3.14.2)",
     "### 10. NASA C-MAPSS FD001: remaining useful life on the LOW tail",
     "DomainBank", "passport_recalibrate", 'weighting="uniform"',
     # "196.0" lived in the paper only (PM2.5 guard KRR-crit); the README
@@ -363,16 +363,42 @@ pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 # v3.13.2: SHD_VERSION in shd/distiller.py is the single source of truth;
 # shd/__init__.py re-exports it (__version__ = SHD_VERSION) instead of
 # duplicating the literal (the duplication is what drifted in v3.10/v3.11).
-check_text("version source 3.14.0", 'SHD_VERSION = "3.14.0"', distiller_src)
+check_text("version source 3.14.2", 'SHD_VERSION = "3.14.2"', distiller_src)
 check_text("version re-export", "__version__ = SHD_VERSION", version)
-check_text("pyproject 3.14.0", 'version = "3.14.0"', pyproject)
+check_text("pyproject 3.14.2", 'version = "3.14.2"', pyproject)
 # The three version carriers must agree; this is the check that would have
 # caught the v3.10.0/v3.11.0 drift before it reached the README title.
 check("version carriers agree",
-      1 if ('SHD_VERSION = "3.14.0"' in distiller_src
+      1 if ('SHD_VERSION = "3.14.2"' in distiller_src
             and "__version__ = SHD_VERSION" in version
-            and 'version = "3.14.0"' in pyproject
-            and "SHD v3.14.0" in README) else 0, 1, 0)
+            and 'version = "3.14.2"' in pyproject
+            and "SHD v3.14.2" in README) else 0, 1, 0)
+
+# --------------------------------------------- presets + gate solver (v3.14.1)
+sys.path.insert(0, str(ROOT))
+import shd as _shd  # noqa: E402
+
+try:
+    _shd.validate_presets()
+    presets_ok = 1
+except Exception:
+    presets_ok = 0
+check("presets validate against the constructor", presets_ok, 1.0, 0)
+check("preset critical_first params",
+      1 if _shd.apply_preset("critical_first") == {"high_band_ratio": 0.65} else 0, 1, 0)
+check("preset balanced params",
+      1 if _shd.apply_preset("balanced") == {"high_band_ratio": 0.50} else 0, 1, 0)
+check("preset sparse_stream params",
+      1 if _shd.apply_preset("sparse_stream_top3pct") == {"tail_quantile": 97.0} else 0, 1, 0)
+check("preset global_first params",
+      1 if _shd.apply_preset("global_first") == {
+          "high_band_ratio": 0.26, "tail_quantile": 84.0} else 0, 1, 0)
+check("preset count", len(_shd.PRESETS), 5, 0)
+portfolio_src = (ROOT / "shd" / "portfolio.py").read_text(encoding="utf-8")
+check_text("gate solver budget 5000", "max_iter=5000", portfolio_src)
+check_text("gate solver fallback recorded", "gate_solver_", portfolio_src)
+check_text("readme documents the logit-C fix", "tune-logit-c", README)
+check_text("readme states the tuned-logit verdict", "Tuned logit beats tuned HGB", README)
 
 print(f"\n{checks} checks, {len(failures)} failures")
 if failures:

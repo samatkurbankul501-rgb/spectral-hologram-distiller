@@ -1,4 +1,4 @@
-﻿"""Smoke tests for the SHD package: distill -> save -> load -> OOD radar.
+"""Smoke tests for the SHD package: distill -> save -> load -> OOD radar.
 
 Runs the full v3.8 pipeline (two-tailed trigger, optional adaptive y-stats,
 opt-in streaming delta continuity) on small synthetic datasets with rare
@@ -93,7 +93,7 @@ def _fit_crystal(X, y, tail, crystal_size=80, seed=3):
 
 
 def test_version():
-    assert __version__ == "3.14.0"
+    assert __version__ == "3.14.2"
 
 
 def test_distiller_shapes(distilled):

@@ -5,6 +5,7 @@ from .distiller import (
 )
 from .bank import DomainBank
 from .portfolio import CoresetPortfolio, ConformalCrystal
+from .presets import PRESETS, apply_preset, validate_presets
 
 #: Single source of truth lives in ``shd.distiller.SHD_VERSION``; it is
 #: recorded into every .hologram.npz artifact at save time (v3.13.1).
@@ -16,5 +17,8 @@ __all__ = [
     "DomainBank",
     "CoresetPortfolio",
     "ConformalCrystal",
+    "PRESETS",
+    "apply_preset",
+    "validate_presets",
     "SHD_VERSION",
 ]

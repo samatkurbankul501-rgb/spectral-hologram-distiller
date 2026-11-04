@@ -1,4 +1,4 @@
-"""Spectral Hologram Distiller (SHD) v3.9.1 — streaming dataset distillation.
+"""Spectral Hologram Distiller (SHD) — streaming dataset distillation.
 
 The core pipeline, in plain terms:
 
@@ -22,6 +22,13 @@ The core pipeline, in plain terms:
 5. **16-bit spectral passport + OOD radar.** The top-32 eigenpairs of ``Psi_hat``
    are stored in float16. A Bures-Wasserstein distance on that 32-dim subspace
    detects domain shift in milliseconds without access to the original dataset.
+
+Threading: SHD objects are NOT thread-safe. The distiller mutates streaming
+state (``_prev_X_row``) and its accumulators on every batch,
+``heal_domain_shift`` mutates the loaded crystal in place, and
+``DomainBank.check_domain_shift(streaming=True)`` advances ``_prev_row`` of
+EVERY candidate crystal, not just the winner. One object per thread;
+single-threaded use is the supported deployment.
 """
 
 from __future__ import annotations
@@ -42,11 +49,11 @@ BW_ALERT_THRESHOLD = 0.085
 #: Package version, single source of truth (re-exported as ``shd.__version__``).
 #: Recorded into every .hologram.npz at save time so a crystal can always tell
 #: which build distilled it.
-SHD_VERSION = "3.14.0"
+SHD_VERSION = "3.14.2"
 
 
 class SpectralHologramDistiller:
-    """Streaming distiller, SHD v3.7 (phase-manifold synthesis).
+    """Streaming distiller (phase-manifold synthesis).
 
     Port of the reference Colab implementation (cell 9 of ``Untitled22.ipynb``),
     kept numerically identical to the published benchmark numbers.
@@ -783,6 +790,12 @@ class SpectralHologramDistiller:
         random_state:
             Optional explicit seed; default reuses the distiller's RNG state.
 
+        Not supported for ``include_deltas=True`` crystals: the swapped
+        rows' sketches would be recomputed on distorted delta pairs, so the
+        method raises ``NotImplementedError`` instead of silently distorting
+        the ridge map and the spectral diagnostics. Use a non-delta crystal
+        for the guard.
+
         Returns a report dict (swapped, pool size, weight diagnostics). The
         crystal is mutated in place; call ``save_hologram`` to persist.
         """
@@ -790,6 +803,16 @@ class SpectralHologramDistiller:
             raise ValueError(
                 "build_global_guard() called before finalize_crystal(); "
                 "the crystal has no rows to guard"
+            )
+        if self.include_deltas:
+            raise NotImplementedError(
+                "build_global_guard() is undefined for include_deltas=True "
+                "crystals: the swapped rows' sketches are recomputed via "
+                "_spectral_transform(X_g), which pairs each medoid's delta with "
+                "the PREVIOUS ROW OF X_g -- an unrelated medoid in k-means order "
+                "(and the stale _prev_X_row for the first one). The ridge map and "
+                "the spectral diagnostics would be built on distorted delta "
+                "pairs. Use a non-delta crystal for the guard."
             )
         n_global = int(n_global)
         if n_global <= 0:
@@ -1314,6 +1337,11 @@ class SpectralHologramDistiller:
                 dtype=np.float64,
             ),
             y_labelled=np.ones(len(self.crystal_Y), dtype=bool),
+            # v3.14.2: label-free crystals store a synthetic novelty coordinate
+            # (spectral leverage) in crystal_Y, not measured targets. Optional
+            # key with a legacy fallback (the schema-1 pattern): older loaders
+            # ignore it, older artifacts load as label_free=False.
+            label_free=np.array(bool(self.unsupervised_mode)),
         )
         if include_projector:
             payload["Omega"] = self.Omega.astype(np.float32)
@@ -1349,7 +1377,12 @@ class HologramCrystalLoader:
         they are read as schema 1 -- the pre-versioning layout IS schema 1.
         Newer schemas are accepted when this loader claims to understand at
         least their baseline, otherwise the mismatch is an explicit error at
-        load time (the schema contract the crystals previously lacked).
+        load time (the schema contract the crystals previously lacked). A
+        schema number NEWER than this loader's that stores no
+        ``schema_min_loader`` key is rejected as well: a real newer artifact
+        always carries the key (its writer knows its own baseline), so its
+        absence means the number is not a trusted minimum-loader contract and
+        must not be silently accepted.
         """
         if "schema_version" not in data:
             return 1  # legacy pre-versioning artifact
@@ -1372,6 +1405,12 @@ class HologramCrystalLoader:
                     f"schema {min_loader}; this loader understands up to schema "
                     f"{HologramCrystalLoader.LOADER_SCHEMA} -- upgrade the shd package"
                 )
+        elif schema > HologramCrystalLoader.LOADER_SCHEMA:
+            raise ValueError(
+                f"artifact schema {schema} is newer than this loader "
+                f"(understands up to schema {HologramCrystalLoader.LOADER_SCHEMA}) "
+                "and stores no schema_min_loader key -- upgrade the shd package"
+            )
         return schema
 
     @staticmethod
@@ -1516,7 +1555,13 @@ class HologramCrystalLoader:
                 )
         else:
             self.y_labelled = np.ones(len(self.y), dtype=bool)
-        self._has_real_targets = bool(np.any(self.y_labelled))
+        # v3.14.2: label-free crystals mark their synthetic novelty coordinate
+        # so heal's novelty branch is reachable; legacy artifacts have no key.
+        if "label_free" in data:
+            self.label_free = bool(np.asarray(data["label_free"]).reshape(-1)[0])
+        else:
+            self.label_free = False  # legacy artifact: predates the marker
+        self._has_real_targets = bool(np.any(self.y_labelled)) and not self.label_free
         self._target_placeholder = float(np.median(self.y[self.y_labelled])) if self._has_real_targets else 0.0
 
         self.k_dim = self.eigvecs.shape[0]
@@ -1525,6 +1570,12 @@ class HologramCrystalLoader:
         else:
             self.tail = "high"  # legacy artifacts predate the tail field
         if self.tail not in ("high", "low", "both"):
+            warnings.warn(
+                f"artifact stores an invalid tail {self.tail!r} (expected 'high', "
+                "'low' or 'both'); falling back to 'high' -- re-save the crystal "
+                "with a current shd build",
+                UserWarning, stacklevel=2,
+            )
             self.tail = "high"
 
         if include_deltas is not None:
@@ -1547,7 +1598,17 @@ class HologramCrystalLoader:
         # Legacy artifacts predate the field and fall back to the 0.26 default.
         if "high_band_ratio" in data:
             br = float(np.asarray(data["high_band_ratio"]).reshape(-1)[0])
-            self.high_band_ratio = br if 0.0 < br < 1.0 else 0.26
+            if 0.0 <= br <= 1.0:
+                self.high_band_ratio = br
+            else:
+                warnings.warn(
+                    f"artifact stores high_band_ratio={br} outside the distiller's "
+                    "valid range [0, 1]; falling back to the 0.26 default -- the "
+                    "peak band this crystal was built with is unknown, re-save it "
+                    "with a current shd build",
+                    UserWarning, stacklevel=2,
+                )
+                self.high_band_ratio = 0.26
         else:
             self.high_band_ratio = 0.26
 
@@ -1555,7 +1616,15 @@ class HologramCrystalLoader:
         # the field and were built over the whole stream.
         if "passport_reference" in data:
             ref = str(np.asarray(data["passport_reference"]).item())
-            self.passport_reference = ref if ref in ("background", "stream") else "stream"
+            if ref not in ("background", "stream"):
+                warnings.warn(
+                    f"artifact stores an invalid passport_reference {ref!r} "
+                    "(expected 'stream' or 'background'); falling back to "
+                    "'stream' -- re-save the crystal with a current shd build",
+                    UserWarning, stacklevel=2,
+                )
+                ref = "stream"
+            self.passport_reference = ref
         else:
             self.passport_reference = "stream"
 
@@ -1573,6 +1642,14 @@ class HologramCrystalLoader:
         # Per-deployment radar calibration (v3.12.0). Legacy artifacts and
         # uncalibrated loaders fall back to the rank-scaled default constant.
         if "tau_calibrated" in data:
+            missing = [k for k in ("tau_window", "tau_n_windows", "tau_fa_rate")
+                       if k not in data]
+            if missing:
+                raise ValueError(
+                    "artifact stores tau_calibrated without " + ", ".join(missing)
+                    + "; the radar calibration must travel as one block -- "
+                    "the artifact is inconsistent"
+                )
             self.tau_calibrated = float(np.asarray(data["tau_calibrated"]).reshape(-1)[0])
             self.tau_window = int(np.asarray(data["tau_window"]).reshape(-1)[0])
             self.tau_n_windows = int(np.asarray(data["tau_n_windows"]).reshape(-1)[0])
@@ -1591,6 +1668,14 @@ class HologramCrystalLoader:
         # check_domain_shift(mean_shift=True) falls back to scoring the
         # mean-shift term against the rank-scaled default threshold.
         if "ms_tau_calibrated" in data:
+            missing = [k for k in ("ms_tau_window", "ms_tau_n_windows", "ms_tau_fa_rate")
+                       if k not in data]
+            if missing:
+                raise ValueError(
+                    "artifact stores ms_tau_calibrated without " + ", ".join(missing)
+                    + "; the combined-radar calibration must travel as one block -- "
+                    "the artifact is inconsistent"
+                )
             self.ms_tau_calibrated = float(np.asarray(data["ms_tau_calibrated"]).reshape(-1)[0])
             self.ms_tau_window = int(np.asarray(data["ms_tau_window"]).reshape(-1)[0])
             self.ms_tau_n_windows = int(np.asarray(data["ms_tau_n_windows"]).reshape(-1)[0])
@@ -2030,10 +2115,13 @@ class HologramCrystalLoader:
         cross-batch continuity. Non-delta crystals ignore the flag; the default
         ``False`` keeps every call an independent, stateless window.
 
-        The threshold is the per-deployment quantile calibration when
-        ``calibrate_threshold()`` has been run (``threshold_source:
-        "calibrated"``), otherwise the rank-scaled default constant
-        (``threshold_source: "default"``).
+        ``threshold_source`` describes the threshold that was ACTUALLY
+        applied: with ``adaptive_threshold=False`` the applied threshold is
+        always the rank-scaled default constant (``threshold_source:
+        "default"``), even when a calibration exists; only
+        ``adaptive_threshold=True`` scores against the per-deployment
+        quantile calibration (``threshold_source: "calibrated"``) when
+        ``calibrate_threshold()`` has been run.
 
         With ``mean_shift=True`` (v3.13.0) the dict also returns
         ``mean_shift_distance`` and ``combined_distance`` (= ``bw_distance`` +
@@ -2063,7 +2151,11 @@ class HologramCrystalLoader:
         res = {
             "bw_distance": bw_dist,
             "threshold": thr,
-            "threshold_source": "calibrated" if self.tau_calibrated is not None else "default",
+            "threshold_source": (
+                "calibrated"
+                if adaptive_threshold and self.tau_calibrated is not None
+                else "default"
+            ),
             "latency_ms": latency_ms,
         }
         if mean_shift:
@@ -2077,7 +2169,9 @@ class HologramCrystalLoader:
             res["combined_distance"] = combined
             res["combined_threshold"] = float(ms_thr)
             res["combined_threshold_source"] = (
-                "calibrated" if self.ms_tau_calibrated is not None else "default"
+                "calibrated"
+                if adaptive_threshold and self.ms_tau_calibrated is not None
+                else "default"
             )
             res["is_shifted"] = combined > ms_thr
         else:
@@ -2536,7 +2630,7 @@ class HologramCrystalLoader:
                 "label-free heal: the injected rows carry a placeholder target, "
                 "not a measured one; drop them with get_training_data("
                 "drop_unlabelled=True) (the default since v3.11.1)"
-                if y_new_stream is None else None
+                if y_new_stream is None and self._has_real_targets else None
             ),
             "bw_before": shift["bw_distance"],
             "bw_after": after["bw_distance"],
@@ -2568,6 +2662,8 @@ class HologramCrystalLoader:
             high_band_ratio=np.array([float(self.high_band_ratio)], dtype=np.float64),
             passport_reference=np.array(self.passport_reference),
             y_labelled=self.y_labelled.astype(bool),
+            # v3.14.2: the label-free marker travels with the re-saved crystal.
+            label_free=np.array(bool(getattr(self, "label_free", False))),
             critical_threshold=np.array(
                 [np.nan if self.critical_threshold is None else float(self.critical_threshold)],
                 dtype=np.float64,

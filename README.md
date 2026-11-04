@@ -1,4 +1,37 @@
-# Spectral Hologram Distiller (SHD v3.14.0)
+# Spectral Hologram Distiller (SHD v3.14.2)
+
+> **v3.14.1 (2026-10-24): measured Scania logit diagnosis, machine-readable
+> presets, and an honest gate-solver budget.** Three tails from the v3.14.0
+> weakness map, each closed by measurement:
+> (1) **The Scania logit failure is a regularization failure, not a crystal
+> failure** — measured, not asserted. A 5-seed probe on the same SHD crystals
+> (`_probe_scania_logit.py`, oracle-logit reproduces the README cost 770
+> bit-for-bit) found the historical hand (logit `C=1.0`, sklearn default) at
+> aucV 0.831, while a validation-tuned `C` reaches aucV 0.974 — within noise of
+> the 0.962 oracle. The best `C` was `0.01` (two orders of magnitude below the
+> sklearn default) in every seed; a "smooth the class weights" hypothesis was
+> tested and *refuted* (aucV 0.799 — worse). At the 10:1 cost scenario
+> `--tune-logit-c` turns SHD+logit into the **best hand of the scenario**
+> (median cost 840.5 vs 993.0 SHD+HGB; artifact
+> `bench_scania_cost_tunedC_results.json`), but at the official 500:10 metric
+> tuned logit still does not catch HGB — recorded, not hidden (below in §8).
+> The full 10-seed runs are not yet significant against the K-Means/Random
+> baselines (8/10, p=0.0625 and 7/10, p=0.16) — 10 seeds cannot make that
+> claim; the HGB baseline wins stay significant (8/10, p=0.0195).
+> (2) **The §6 deployment presets now exist as data** (`shd/presets.py`,
+> re-exported from `shd`): `apply_preset("critical_first")` and four others,
+> cross-linked from §6; `validate_presets()` (run by the test-suite and by
+> `tools/verify_claims.py`) fails loudly if a preset drifts from the
+> constructor signature. The constructor defaults are untouched — the
+> historical artifacts stay bit-for-bit reproducible.
+> (3) **The gate logistic regression no longer silently hits its iteration
+> budget**: `max_iter=5000` with `lbfgs` as primary solver (committed v3.14.0
+> artifacts were produced under lbfgs; converged fits are bit-identical at any
+> higher `max_iter` — artifact reproducibility is the reason, not preference),
+> deterministic `liblinear` only as an exhausted-budget fallback, recorded in
+> `gate_solver_` (the probe found superconduct at 1228/2000 iterations — the
+> warning was real, and convergence is now detected from `n_iter_`, not by
+> reading stderr). Regressions: `tests/test_presets_and_gate.py` (15 tests).
 
 > **v3.14.0 (2026-10-24): opt-in two-expert portfolio + Mondrian conformal
 > intervals.** Two new public classes in `shd.portfolio` (re-exported from
@@ -651,6 +684,14 @@ oracle 20/20 (2.40 vs 2.78 K) but not the GBM oracle (median 1.29 vs 1.11 K,
 | critical / rare-event first | 0.65 | 84 |
 | sparse stream (top-3% regime) | 0.26 | **97** |
 
+Since v3.14.1 these presets ship as **data, not prose** — `shd/presets.py`
+(re-exported from `shd`): `from shd import apply_preset;` then
+`SpectralHologramDistiller(crystal_size=600, **apply_preset("critical_first"))`.
+`apply_preset` rejects budget/reproducibility overrides (`crystal_size`,
+`sketch_dim`, `random_state` — the caller owns those), and
+`shd.presets.validate_presets()` (run by the test-suite) fails loudly if a
+preset ever drifts from the constructor signature.
+
 `tail_quantile` should match the *percentile of the regime you care about*: on
 the Beijing PM2.5 time-shifted stream (critical = top 3%) the default `84`
 only reaches a tie, whereas `tail_quantile=97` gives a significant critical
@@ -772,6 +813,34 @@ This historical HGB experiment favours SHD under the chosen 10:1 cost scenario;
 linear-model medians favour K-Means. Deployment needs a pre-agreed cost model
 and fresh validation on the target equipment.
 
+**Why the historical logit arm failed — and the tuned rerun (v3.14.1).** The
+logit rows above use the sklearn default `C=1.0`. A 5-seed probe on the same
+SHD crystals measured aucV 0.831 for that hand against 0.974 for a
+validation-tuned `C` (oracle 0.962); the best `C` was `0.01` in every seed —
+two orders of magnitude stronger regularization than the default. A "smooth the
+class weights" variant was tested and *refuted* (aucV 0.799, the worst of the
+three hands): the crystal was never the bottleneck. Rerun with
+`python bench_scania_cost.py --tune-logit-c` (`C` tuned on the same held-out
+validation slice, grid 0.01–10.0; 10 seeds; artifact
+`bench_scania_cost_tunedC_results.json`):
+
+| Coreset (300 rows) | Model | Failures missed | False alarms | Recall | Precision | Cost = 10·FN + 1·FP |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
+| Random | logit | 57.5 | 418.5 | 0.847 | 0.425 | 974.5 |
+| K-Means | logit | 47.5 | 385.5 | 0.873 | 0.432 | 914.0 |
+| **SHD** | **tuned logit** | **49.5** | 330.0 | **0.868** | 0.497 | **840.5** |
+
+Tuned logit beats tuned HGB on the same crystals (840.5 vs 993.0) and every
+logit arm improves over its historical-`C` self — against the historical SHD
+row the tuned hand cuts the cost by 40.8% (1419.0 → 840.5) while recall rises
+0.679 → 0.868. The honest caveat: with 10 seeds the paired wins over Random
+(8/10, $p=0.0625$) and K-Means (7/10, $p=0.16$) are **not significant** — the
+medians rank SHD first, but 10 seeds cannot make that claim; only the
+HGB-baseline comparisons stay significant (8/10, $p=0.0195$). The
+crystal-positive mechanism is unchanged (median 25.0 SHD positives vs
+7.0/7.5). Do not sell the logit improvement as a significant superiority over
+the baselines.
+
 Source of truth: `bench_scania_cost_results.json`; the table above is generated
 from it by `make_scania_table.py`.
 
@@ -801,6 +870,34 @@ fewest failures of any 300-row coreset (17.5 vs 34.0/41.5). The model-family
 caveat cuts both ways: SHD+logit is the *worst* arm under the official metric
 (95.0 missed), so the crystal helps the learner that can exploit its density,
 not every learner.
+
+**Official metric rerun with validation-tuned `C` (v3.14.1, 10 seeds;
+`bench_scania_cost_tunedC_500x10_results.json`).** The tuned-C run of the
+official 500·FN + 10·FP scenario (same `--tune-logit-c` flag, grid tuned on the
+held-out validation slice; artifact `bench_scania_cost_tunedC_500x10_results.json`):
+
+| Coreset (300 rows) | Model | Failures missed | False alarms | Recall | Cost = 500·FN + 10·FP |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| **Full train (oracle)** | HGB | 13 | 396 | 0.965 | **10460** |
+| **Full train (oracle)** | tuned logit | 24 | 388 | 0.936 | **15880** |
+| Random | HGB | 34.0 | 1074.5 | 0.909 | 32355.0 |
+| K-Means | HGB | 43.5 | 786.5 | 0.884 | 32035.0 |
+| **SHD** | **HGB** | **17.5** | 969.0 | **0.953** | **18645.0** |
+| Random | tuned logit | 28.0 | 802.0 | 0.925 | 20615.0 |
+| K-Means | tuned logit | 20.5 | 768.5 | 0.945 | **17155.0** |
+| SHD | tuned logit | 26.0 | 631.5 | 0.931 | 18860.0 |
+
+The honest verdict for the official metric: **tuned logit does not catch up**
+— SHD+tuned-logit (18860.0) sits *above* SHD+HGB (18645.0) and *below*
+K-Means+tuned-logit (17155.0): under the 50:1 recall-heavy cost, HGB still wins.
+Tuning `C` fixed the *logit vs logit* comparison (53330.0 → 18860.0, −64.6%
+against its own historical row) but not the model-family gap: the tree ensemble
+exploits the SHD crystal's rare-row density far better than a linear boundary
+can. Paired Wilcoxon on the tuned run: SHD vs Random (HGB) **9/10 wins,
+$p=0.0039$**; SHD vs K-Means (HGB) **9/10 wins, $p=0.0039$**; tuned-logit
+comparisons are not significant (5/10, $p=0.43$; 3/10, $p=0.49$). The two
+sides of the story must be quoted together: 10:1 — tuned logit is the best
+hand (840.5); 500:10 — HGB remains the stronger learner on the SHD crystal.
 
 ### 9. Early warning on a real metro compressor (`shd_watch.py`, `bench_metro_watch.py`)
 

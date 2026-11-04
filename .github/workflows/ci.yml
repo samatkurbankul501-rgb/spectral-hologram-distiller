@@ -2,15 +2,16 @@
 #
 # Runs on every push and PR. Two-tier strategy mirrors the repo's own doctrine
 # (tests/run_smoke.py header): the CPU-cheap dependency-free smoke tier gates
-# everything; the full pytest tier runs on 3.11/3.12 and the oldest supported
-# NumPy (1.24) + the newest, catching both ends of the support window.
+# everything; the full pytest tier runs on 3.10 + the oldest supported NumPy
+# (1.24) and on 3.12 + the newest NumPy, catching both ends of the support
+# window.
 #
 # Guards (all cheap, all would have caught past releases):
 # * pip install -e .  -- packaging metadata (pyproject) must stay installable;
 #   this is where a stale "version =" would break first.
 # * tests/run_smoke.py  -- dependency-free tier, exact PASS/FAIL lines.
 # * pytest tests -q  -- the full suite (golden numbers included).
-# * tools/verify_claims.py  -- README/paper/artifact claims audit (261 checks),
+# * tools/verify_claims.py  -- README/paper/artifact claims audit (271 checks),
 #   including the version-carriers-agree invariant.
 #
 # The MetroPT-3 / PM2.5 / superconduct artifacts live in git (58 files under

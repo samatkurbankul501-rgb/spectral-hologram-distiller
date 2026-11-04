@@ -81,16 +81,18 @@ def test_portfolio_fit_predict_contract():
     assert np.all(p >= lo) and np.all(p <= hi)
 
 
-def test_portfolio_streaming_flag_is_stateless():
+def test_portfolio_predict_is_stateless():
+    # v3.14.2: the ignored ``streaming`` no-op parameter of predict() was
+    # removed; predict is stateless, so one combined call must equal two
+    # separate ones.
     X, y = make_stream()
     Xc, yc, wc, Xg, yg, wg, scaler, gamma = make_arms(X, y)
     pf = CoresetPortfolio(critical_threshold=6.0).fit(
         Xc, yc, wc, Xg, yg, wg, scaler, rbf_gamma=gamma)
     X1 = X[:64]
     X2 = X[64:128]
-    both = pf.predict(np.vstack([X1, X2]), streaming=True)
-    sep = np.concatenate([pf.predict(X1, streaming=True),
-                          pf.predict(X2, streaming=True)])
+    both = pf.predict(np.vstack([X1, X2]))
+    sep = np.concatenate([pf.predict(X1), pf.predict(X2)])
     assert np.allclose(both, sep)
 
 
@@ -322,7 +324,7 @@ def test_integration_portfolio_then_conformal_intervals():
         itself is one."""
 
         def predict(self, Z):
-            return pf.predict(scaler.inverse_transform(Z), streaming=True)
+            return pf.predict(scaler.inverse_transform(Z))
 
     rng = np.random.default_rng(8)
     idx = rng.choice(len(X), size=600, replace=False)
@@ -332,7 +334,7 @@ def test_integration_portfolio_then_conformal_intervals():
     Xq = X[:1000]
     yq = y[:1000]
     iv = cc.predict_interval(Xq, _PortfolioModel(), alpha=0.10)
-    pred = pf.predict(Xq, streaming=True)
+    pred = pf.predict(Xq)
     assert np.allclose(iv["pred"], pred)
     cov = float(np.mean((yq >= iv["low"]) & (yq <= iv["high"])))
     assert cov >= 0.85, f"portfolio-conformal coverage {cov:.3f}"

@@ -231,6 +231,13 @@ def _best_X(X, coresets, kernel, meanK=None):
     (goodpoints.kt.best_X)"""
     n = X.shape[0]
     coreset_size = coresets.shape[1]
+    if coreset_size < 1:
+        # floor(n / 2**m) == 0: the standard-thinning stride below would divide
+        # by zero (upstream goodpoints fails here too, just less clearly).
+        raise ValueError(
+            f"kernel thinning got n={n} points for coreset size {coreset_size} "
+            "(floor(n / 2**m) == 0): need n >= 2**m -- reduce m or pass more points"
+        )
     best_coreset = np.array(range(n - 1, -1, -(n // coreset_size)))[::-1]
     best_rel_mmd2 = _squared_emp_rel_mmd_X(X, best_coreset, kernel, meanK=meanK)
     for coreset in coresets:
@@ -298,6 +305,10 @@ def kt_thin(X, m, var, delta=0.5, seed=None, unique=False):
     all row indices. Returns coreset indices of size floor(n / 2^m) into X.
     Split kernel: Gaussian with var/2; swap kernel: Gaussian with var
     (the configuration of the official numpy experiment notebook).
+
+    ``seed=None`` (the default) means NON-DETERMINISTIC output: the split
+    coin flips come from an unseeded generator; pass an explicit ``seed``
+    for reproducible coresets.
     """
     X = np.asarray(X, dtype=np.float64)
     if m == 0:
