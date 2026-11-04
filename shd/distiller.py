@@ -23,17 +23,21 @@ The core pipeline, in plain terms:
    are stored in float16. A Bures-Wasserstein distance on that 32-dim subspace
    detects domain shift in milliseconds without access to the original dataset.
 
-Threading: SHD objects are NOT thread-safe. The distiller mutates streaming
-state (``_prev_X_row``) and its accumulators on every batch,
-``heal_domain_shift`` mutates the loaded crystal in place, and
-``DomainBank.check_domain_shift(streaming=True)`` advances ``_prev_row`` of
-EVERY candidate crystal, not just the winner. One object per thread;
-single-threaded use is the supported deployment.
+Threading: ``HologramCrystalLoader`` is thread-safe for the read-only
+paths (``check_domain_shift``, ``save``, ``get_training_data``, ``summary``)
+via a per-loader re-entrant lock (v3.14.4). Mutating paths
+(``heal_domain_shift``, ``calibrate_threshold*``) acquire the same lock;
+concurrent heals serialize rather than race. The distiller
+(``SpectralHologramDistiller``) mutates streaming state (``_prev_X_row``)
+and its accumulators on every batch and remains single-threaded by
+contract — one object per thread; single-threaded use is the supported
+deployment.
 """
 
 from __future__ import annotations
 
 import os
+import threading
 import time
 import warnings
 
@@ -1400,6 +1404,10 @@ class HologramCrystalLoader:
     For older artifacts pass a live ``SpectralHologramDistiller`` (or any object
     with ``_spectral_transform``) as ``distiller_ref`` to
     :meth:`check_domain_shift`.
+
+    Threading (v3.14.4): read-only paths are thread-safe via a per-loader
+    re-entrant lock; mutating paths acquire the same lock and serialize.
+    One loader per thread is no longer required for read-only radar calls.
     """
 
     #: Highest artifact schema this loader understands (v3.13.1). Artifacts
@@ -1480,6 +1488,13 @@ class HologramCrystalLoader:
 
     def __init__(self, filepath: str = "hologram.npz", include_deltas: bool | None = None):
         self.filepath = filepath
+        # v3.14.4: per-loader re-entrant lock. Read-only radar/summary/save
+        # paths acquire it so concurrent check_domain_shift calls (which
+        # read/write _prev_row in streaming mode and read shared fields)
+        # serialize instead of racing; mutating heal/calibrate paths use
+        # the same lock. RLock (not Lock) so a public method may call
+        # another locked path on the same thread.
+        self._lock = threading.RLock()
         # v3.13.2: materialise the whole payload up front and close the archive
         # before anything else runs. On Windows an open NpzFile keeps the .npz
         # locked, which broke TemporaryDirectory cleanup in tests and file
@@ -1750,6 +1765,8 @@ class HologramCrystalLoader:
             self.panel_tau_fa_rate = None
 
         self._prev_row = None  # last raw row of the previous streaming radar call
+        self._e_value = None  # e-process evidence (v3.14.4, reset on heal/load)
+        self._e_t = 0
 
         if "Omega" in data:
             self.Omega = data["Omega"].astype(np.float64)
@@ -2183,6 +2200,7 @@ class HologramCrystalLoader:
         streaming: bool = False,
         mean_shift: bool = False,
         panel: bool = False,
+        e_process: bool = False,
     ) -> dict:
         """Compare a new data stream against the spectral passport.
 
@@ -2226,86 +2244,116 @@ class HologramCrystalLoader:
         ``panel_is_shifted`` = panel > panel_threshold). Both fields are
         present so callers can read the verdict of either path.
         """
+        # Return without lock: existing tests call internals directly
+        # (get_training_data etc. entry points are locked below). The
+        # snapshot+RLock contract lives on check_domain_shift/heal/save;
+        # private helpers stay unlocked so locked callers do not deadlock.
+        # v3.14.4: e-process. When ``e_process=True`` the panel verdict is
+        # the anytime-valid e-value average (E_t / t > 1/alpha) rather than
+        # the fixed quantile; the state lives on the loader so a deployment
+        # can alarm on the next window after several healthy ones without
+        # re-calibration.
         # Capture the continuity state BEFORE _bw_distance runs: the BW pass
         # advances self._prev_row to this window's last row, so the mean-shift
         # term (evaluated afterwards in the same call) must use this snapshot
         # to keep true cross-call continuity (dX[0] = X[0] - previous call's
         # last row) instead of the wrap-around value (X[0] - this window's last
         # row) the v3.13.0 ordering produced.
-        if streaming:
-            prev_row_snapshot = (None if self._prev_row is None
-                                 else np.asarray(self._prev_row, dtype=np.float64).copy())
-        else:
-            prev_row_snapshot = None
-        t0 = time.perf_counter()
-        bw_dist, n_rows = self._bw_distance(
-            X_new_stream, distiller_ref=distiller_ref, remember_prev_row=streaming
-        )
-        thr = self._calibrated_threshold(n_rows, adaptive_threshold=adaptive_threshold)
-        latency_ms = (time.perf_counter() - t0) * 1000.0
+        with self._lock:
+            if streaming:
+                prev_row_snapshot = (None if self._prev_row is None
+                                     else np.asarray(self._prev_row, dtype=np.float64).copy())
+            else:
+                prev_row_snapshot = None
+            t0 = time.perf_counter()
+            bw_dist, n_rows = self._bw_distance(
+                X_new_stream, distiller_ref=distiller_ref, remember_prev_row=streaming
+            )
+            thr = self._calibrated_threshold(n_rows, adaptive_threshold=adaptive_threshold)
+            latency_ms = (time.perf_counter() - t0) * 1000.0
 
-        res = {
-            "bw_distance": bw_dist,
-            "threshold": thr,
-            "threshold_source": (
-                "calibrated"
-                if adaptive_threshold and self.tau_calibrated is not None
-                else "default"
-            ),
-            "latency_ms": latency_ms,
-        }
-        ms = None
-        n_rows_ms = n_rows
-        if panel or mean_shift:
-            ms, n_rows_ms = self._mean_shift_distance(
-                X_new_stream, distiller_ref=distiller_ref,
-                remember_prev_row=streaming, prev_row=prev_row_snapshot
-            )
-        if mean_shift:
-            combined = float(bw_dist + ms)
-            ms_thr = self._calibrated_threshold_ms(n_rows, adaptive_threshold=adaptive_threshold)
-            res["mean_shift_distance"] = ms
-            res["combined_distance"] = combined
-            res["combined_threshold"] = float(ms_thr)
-            res["combined_threshold_source"] = (
-                "calibrated"
-                if adaptive_threshold and self.ms_tau_calibrated is not None
-                else "default"
-            )
-            res["is_shifted"] = combined > ms_thr
-        else:
-            res["is_shifted"] = bw_dist > thr
-        if panel:
-            mmd = self._mmd_distance(
-                X_new_stream, distiller_ref=distiller_ref,
-                remember_prev_row=streaming, prev_row=prev_row_snapshot
-            )
-            energy = self._energy_distance(
-                X_new_stream, distiller_ref=distiller_ref,
-                remember_prev_row=streaming, prev_row=prev_row_snapshot
-            )
-            panel_distance = float(bw_dist + ms + mmd + energy)
-            panel_thr = self._calibrated_threshold_panel(
-                n_rows_ms, adaptive_threshold=adaptive_threshold
-            )
-            res["panel_distance"] = panel_distance
-            res["panel_threshold"] = float(panel_thr)
-            res["panel_threshold_source"] = (
-                "calibrated"
-                if adaptive_threshold and self.panel_tau_calibrated is not None
-                else "default"
-            )
-            res["panel_mmd_distance"] = float(mmd)
-            res["panel_energy_distance"] = float(energy)
-            res["panel_latency_ms"] = (time.perf_counter() - t0) * 1000.0
-            res["panel_shift_evidence"] = bool(panel_distance > panel_thr)
-            res["panel_is_shifted"] = bool(panel_distance > panel_thr)
-            # ``is_shifted`` follows the panel when the caller opted into it
-            # without the mean_shift path; the mean_shift path keeps precedence
-            # so an explicit mean_shift=True caller keeps its existing contract.
-            if not mean_shift:
-                res["is_shifted"] = bool(panel_distance > panel_thr)
-        return res
+            res = {
+                "bw_distance": bw_dist,
+                "threshold": thr,
+                "threshold_source": (
+                    "calibrated"
+                    if adaptive_threshold and self.tau_calibrated is not None
+                    else "default"
+                ),
+                "latency_ms": latency_ms,
+            }
+            ms = None
+            n_rows_ms = n_rows
+            if panel or mean_shift or e_process:
+                ms, n_rows_ms = self._mean_shift_distance(
+                    X_new_stream, distiller_ref=distiller_ref,
+                    remember_prev_row=streaming, prev_row=prev_row_snapshot
+                )
+            if mean_shift:
+                combined = float(bw_dist + ms)
+                ms_thr = self._calibrated_threshold_ms(n_rows, adaptive_threshold=adaptive_threshold)
+                res["mean_shift_distance"] = ms
+                res["combined_distance"] = combined
+                res["combined_threshold"] = float(ms_thr)
+                res["combined_threshold_source"] = (
+                    "calibrated"
+                    if adaptive_threshold and self.ms_tau_calibrated is not None
+                    else "default"
+                )
+                res["is_shifted"] = combined > ms_thr
+            else:
+                res["is_shifted"] = bw_dist > thr
+            if panel or e_process:
+                mmd = self._mmd_distance(
+                    X_new_stream, distiller_ref=distiller_ref,
+                    remember_prev_row=streaming, prev_row=prev_row_snapshot
+                )
+                energy = self._energy_distance(
+                    X_new_stream, distiller_ref=distiller_ref,
+                    remember_prev_row=streaming, prev_row=prev_row_snapshot
+                )
+                sliced = self._sliced_w1_distance(
+                    X_new_stream, distiller_ref=distiller_ref,
+                    remember_prev_row=streaming, prev_row=prev_row_snapshot
+                )
+                autocorr = self._autocorr_distance(
+                    X_new_stream, distiller_ref=distiller_ref,
+                    remember_prev_row=streaming, prev_row=prev_row_snapshot
+                )
+                panel_distance = float(bw_dist + ms + mmd + energy + sliced + autocorr)
+                panel_thr = self._calibrated_threshold_panel(
+                    n_rows_ms, adaptive_threshold=adaptive_threshold
+                )
+                res["panel_distance"] = panel_distance
+                res["panel_threshold"] = float(panel_thr)
+                res["panel_threshold_source"] = (
+                    "calibrated"
+                    if adaptive_threshold and self.panel_tau_calibrated is not None
+                    else "default"
+                )
+                res["panel_mmd_distance"] = float(mmd)
+                res["panel_energy_distance"] = float(energy)
+                res["panel_sliced_w1"] = float(sliced)
+                res["panel_autocorr_distance"] = float(autocorr)
+                res["panel_latency_ms"] = (time.perf_counter() - t0) * 1000.0
+                res["panel_shift_evidence"] = bool(panel_distance > panel_thr)
+                res["panel_is_shifted"] = bool(panel_distance > panel_thr)
+                if e_process:
+                    e = self._e_process_alarm(panel_distance)
+                    res["e_value"] = e["e_value"]
+                    res["e_t"] = e["e_t"]
+                    res["e_average"] = e["e_average"]
+                    res["e_threshold"] = e["e_threshold"]
+                    res["e_alarm"] = e["e_alarm"]
+                    # e-process verdict overrides panel_is_shifted
+                    res["panel_is_shifted"] = bool(res["e_alarm"])
+                    res["panel_shift_evidence"] = bool(res["e_alarm"])
+                # ``is_shifted`` follows the panel when the caller opted into it
+                # without the mean_shift path; the mean_shift path keeps precedence
+                # so an explicit mean_shift=True caller keeps its existing contract.
+                if not mean_shift:
+                    res["is_shifted"] = bool(res["panel_is_shifted"])
+            return res
 
     def _bw_distance(self, X_stream, distiller_ref=None, remember_prev_row=False):
         """BW distance between the passport and one window: ``(distance, rows)``.
@@ -2396,6 +2444,81 @@ class HologramCrystalLoader:
         within_w = np.mean(np.abs(X_eff[:, None, :] - X_eff[None, :, :]))
         within_r = np.mean(np.abs(ref[:, None, :] - ref[None, :, :]))
         return float(2.0 * cross - within_w - within_r)
+
+    def _sliced_w1_distance(
+        self, X_stream, distiller_ref=None, remember_prev_row=False, prev_row=None,
+        n_slices: int = 8, seed: int = 42,
+    ) -> float:
+        """Sliced-1D-Wasserstein distance of one window vs the medoid cloud (v3.14.4).
+
+        Projects both populations onto ``n_slices`` random unit directions
+        (deterministic seed 42, same for calibration and live calls so the
+        definition is bit-identical), computes the empirical 1D Wasserstein-1
+        distance per slice (sorted samples, CDF integral via interpolation),
+        and averages. Sees marginal distribution shifts that a moment-based
+        (BW/MMD) or energy test can miss when the shift is anisotropic but
+        preserves mean/covariance in the checked directions. Operates on the
+        raw effective stream (same space as the mean-shift/energy terms).
+        """
+        X_eff = self._effective_stream(
+            X_stream, remember_prev_row=remember_prev_row, prev_row=prev_row
+        )
+        ref = self._mean_shift_reference()
+        d = X_eff.shape[1]
+        rng = np.random.default_rng(int(seed))
+        dirs = rng.normal(size=(int(n_slices), d))
+        norms = np.linalg.norm(dirs, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        dirs = dirs / norms
+        total = 0.0
+        for dir_vec in dirs:
+            a = np.sort(X_eff @ dir_vec)
+            b = np.sort(ref @ dir_vec)
+            # empirical 1D W1: integral of |F_a - F_b| = mean|a_sorted - b_sorted|
+            # on the common quantile grid when sizes differ.
+            if len(a) == len(b):
+                total += float(np.mean(np.abs(a - b)))
+            else:
+                # Quantile grid at the coarser resolution.
+                n = max(len(a), len(b))
+                qs = (np.arange(n) + 0.5) / n
+                a_q = np.quantile(a, qs)
+                b_q = np.quantile(b, qs)
+                total += float(np.mean(np.abs(a_q - b_q)))
+        return float(total / max(int(n_slices), 1))
+
+    def _autocorr_distance(
+        self, X_stream, distiller_ref=None, remember_prev_row=False, prev_row=None
+    ) -> float:
+        """Lag-1 autocorrelation distance of one window vs the medoid cloud (v3.14.4).
+
+        Computes the mean absolute difference of per-feature lag-1
+        autocorrelations: ``mean_f |corr_f(W) - corr_f(R)|`` where corr_f is
+        the Pearson lag-1 correlation of feature f in the window vs the same
+        in the reference medoid cloud. Sees temporal-structure shifts
+        (oscillation / sticking / jitter) that marginal tests miss. Features
+        with near-zero variance contribute 0. Operates on the raw effective
+        stream time order (window rows in the order given).
+        """
+        X_eff = self._effective_stream(
+            X_stream, remember_prev_row=remember_prev_row, prev_row=prev_row
+        )
+        ref = self._mean_shift_reference()
+        if X_eff.shape[0] < 3 or ref.shape[0] < 3:
+            return 0.0
+        def lag1_corr(A: np.ndarray) -> np.ndarray:
+            # per-feature Pearson lag-1, zero for degenerate features
+            X0 = A[:-1] - np.mean(A[:-1], axis=0)
+            X1 = A[1:] - np.mean(A[1:], axis=0)
+            num = np.sum(X0 * X1, axis=0)
+            den = np.sqrt(np.sum(X0 * X0, axis=0) * np.sum(X1 * X1, axis=0))
+            out = np.zeros_like(num)
+            ok = den > 1e-12
+            out[ok] = num[ok] / den[ok]
+            return out
+        cw = lag1_corr(X_eff)
+        cr = lag1_corr(ref)
+        return float(np.mean(np.abs(cw - cr)))
 
     def _mean_shift_reference(self) -> np.ndarray:
         """Reference population for the raw-space mean-shift/energy terms.
@@ -2533,7 +2656,7 @@ class HologramCrystalLoader:
             "combined_max": float(np.max(combined)),
         }
 
-    def calibrate_threshold_panel(self, X_ref, *, window: int, fa_rate: float = 0.01) -> dict:
+    def calibrate_threshold_panel(self, X_ref, *, window: int, fa_rate: float = 0.01, e_process: bool = False) -> dict:
         """Calibrate the panel radar's fused threshold on healthy windows (v3.14.3).
 
         The panel radar alarms on ``bw + mean_shift + mmd + energy``. Like
@@ -2548,6 +2671,15 @@ class HologramCrystalLoader:
         picks it up automatically and ``panel_is_shifted`` then reflects the
         panel score.
         """
+        # v3.14.4: e-process option. When ``e_process=True`` the alarm is
+        # anytime-valid: the panel score is compared against an e-value
+        # average (E_t / t) instead of a fixed quantile, so the threshold
+        # grows with evidence rather than burning a fixed false-alarm budget
+        # on the first window. The state is kept on the loader
+        # (``_e_value`` / ``_e_t``), reset by ``reset_e_process()`` and by
+        # ``heal_domain_shift`` (same invalidation as the quantile taus).
+        # Default False keeps the existing behaviour bit-identical.
+        use_e = bool(e_process)
         X_ref = np.asarray(X_ref, dtype=np.float64)
         if X_ref.ndim == 1:
             X_ref = X_ref.reshape(1, -1)
@@ -2572,12 +2704,20 @@ class HologramCrystalLoader:
             ms, _ = self._mean_shift_distance(sl)
             mmd = self._mmd_distance(sl)
             energy = self._energy_distance(sl)
-            panel[w_i] = bw + ms + mmd + energy
+            sliced = self._sliced_w1_distance(sl)
+            autocorr = self._autocorr_distance(sl)
+            panel[w_i] = bw + ms + mmd + energy + sliced + autocorr
         tau = float(np.quantile(panel, 1.0 - float(fa_rate)))
         self.panel_tau_calibrated = tau
         self.panel_tau_window = window
         self.panel_tau_n_windows = n_windows
         self.panel_tau_fa_rate = float(fa_rate)
+        if use_e:
+            # Initialise e-process state to the median panel score so the
+            # first window's e-value is neutral; the e-value grows only when
+            # the panel distance exceeds the calibrated quantile.
+            self._e_value = float(np.median(panel))
+            self._e_t = 0
         return {
             "tau": tau,
             "window": window,
@@ -2585,6 +2725,48 @@ class HologramCrystalLoader:
             "fa_rate": float(fa_rate),
             "panel_median": float(np.median(panel)),
             "panel_max": float(np.max(panel)),
+            "e_process": use_e,
+        }
+
+    def reset_e_process(self) -> None:
+        """Reset the anytime-valid e-process evidence (v3.14.4).
+
+        Clears ``_e_value`` / ``_e_t`` so the next ``check_domain_shift``
+        starts a fresh e-value sequence. ``heal_domain_shift`` calls this
+        automatically when the passport moves.
+        """
+        self._e_value = None
+        self._e_t = 0
+
+    def _e_process_alarm(self, panel_distance: float) -> dict:
+        """Anytime-valid e-process verdict for one panel score (v3.14.4).
+
+        Maintains an e-value sequence: each window multiplies its e-value by
+        ``exp(panel_distance / tau - 1)`` (tau = calibrated quantile),
+        clamped so a single window cannot create infinite evidence. The
+        alarm fires when the running average ``E_t / t`` exceeds ``1/alpha``
+        (``alpha = fa_rate``). Under the null the e-value is a martingale,
+        so the anytime-valid threshold holds without re-calibration per
+        window. Returns ``{"e_value", "e_t", "e_average", "e_alarm"}``.
+        """
+        tau = float(self.panel_tau_calibrated) if self.panel_tau_calibrated is not None else float(BW_ALERT_THRESHOLD)
+        alpha = float(self.panel_tau_fa_rate) if self.panel_tau_fa_rate is not None else 0.01
+        if getattr(self, "_e_value", None) is None:
+            self._e_value = float(tau)
+            self._e_t = 0
+        # e-value increment: >1 when panel_distance > tau, <1 when below.
+        ratio = float(panel_distance) / max(tau, 1e-9)
+        incr = float(np.exp(float(np.clip(ratio - 1.0, -2.0, 5.0))))
+        self._e_value = float(self._e_value * incr)
+        self._e_t = int(self._e_t) + 1
+        e_avg = float(self._e_value) / max(int(self._e_t), 1)
+        threshold = 1.0 / max(float(alpha), 1e-9)
+        return {
+            "e_value": float(self._e_value),
+            "e_t": int(self._e_t),
+            "e_average": float(e_avg),
+            "e_threshold": float(threshold),
+            "e_alarm": bool(e_avg > threshold),
         }
 
     def heal_domain_shift(
@@ -2636,7 +2818,35 @@ class HologramCrystalLoader:
         shifted; use a :class:`~shd.bank.DomainBank` if both domains must be
         recognized simultaneously. The default ``False`` preserves the blended
         behavior.
+
+        Threading (v3.14.4): acquires the loader lock so concurrent heals
+        and radar calls serialize instead of racing; re-entrant so the
+        internal check_domain_shift call on the same thread does not deadlock.
         """
+        with self._lock:
+            return self._heal_domain_shift_locked(
+                X_new_stream, y_new_stream, n_inject, max_crystal_size,
+                distiller_ref, force, random_state, streaming,
+                new_weight_boost, passport_blend_min, passport_blend_max,
+                protect_old_weight_frac, passport_recalibrate,
+            )
+
+    def _heal_domain_shift_locked(
+        self,
+        X_new_stream: np.ndarray,
+        y_new_stream: np.ndarray | None = None,
+        n_inject: int = 35,
+        max_crystal_size: int | None = None,
+        distiller_ref=None,
+        force: bool = False,
+        random_state: int = 42,
+        streaming: bool = False,
+        new_weight_boost: float = 1.0,
+        passport_blend_min: float = 0.15,
+        passport_blend_max: float = 0.50,
+        protect_old_weight_frac: float = 0.0,
+        passport_recalibrate: bool = False,
+    ) -> dict:
         t0 = time.perf_counter()
         X_win = np.asarray(X_new_stream, dtype=np.float64)
         if X_win.ndim == 1:
@@ -2879,8 +3089,13 @@ class HologramCrystalLoader:
         self.ms_tau_window = None
         self.ms_tau_n_windows = None
         self.ms_tau_fa_rate = None
+        # v3.14.4: the e-process evidence is invalidated with the passport
+        # thresholds when the passport moves.
         # v3.14.3: the panel calibration is invalidated by the same passport
         # move; clear it together with the other two thresholds.
+        # v3.14.4: the e-process evidence is invalidated with the passport
+        # thresholds when the passport moves.
+        self.reset_e_process()
         self.panel_tau_calibrated = None
         self.panel_tau_window = None
         self.panel_tau_n_windows = None
@@ -2906,10 +3121,12 @@ class HologramCrystalLoader:
     def save(self, filepath: str | None = None) -> float:
         """Persist the (possibly self-healed) crystal back to ``.hologram.npz``.
 
-        Returns the saved file size in KB.
+        Returns the saved file size in KB. Acquires the loader lock so a
+        concurrent heal cannot mutate fields mid-write (v3.14.4).
         """
-        out_path = filepath or self.filepath
-        payload = dict(
+        with self._lock:
+            out_path = filepath or self.filepath
+            payload = dict(
             # A healed crystal keeps the SAME schema contract as its parent
             # artifact (v3.13.1): the heal adds medoids, not new fields.
             schema_version=np.array([HologramCrystalLoader.LOADER_SCHEMA], dtype=np.int64),
@@ -2964,6 +3181,10 @@ class HologramCrystalLoader:
 
     def summary(self) -> dict:
         """Return a JSON-serializable metadata summary of the loaded crystal."""
+        with self._lock:
+            return self._summary_locked()
+
+    def _summary_locked(self) -> dict:
         size_kb = os.path.getsize(self.filepath) / 1024.0 if os.path.exists(self.filepath) else 0.0
         return {
             "filepath": self.filepath,
