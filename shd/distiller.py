@@ -53,7 +53,7 @@ BW_ALERT_THRESHOLD = 0.085
 #: Package version, single source of truth (re-exported as ``shd.__version__``).
 #: Recorded into every .hologram.npz at save time so a crystal can always tell
 #: which build distilled it.
-SHD_VERSION = "3.14.2"
+SHD_VERSION = "3.15.0"
 
 
 class SpectralHologramDistiller:
@@ -198,6 +198,8 @@ class SpectralHologramDistiller:
         fista_l2_reg: float = 0.20,
         voronoi_temper: float = 0.55,
         herding_mix: float = 0.75,
+        residual_weight: float = 1.0,
+        rff_mode: str = "dual",
         on_nonfinite: str = "raise",
         use_residual: bool = True,
         critical_threshold: float | None = None,
@@ -245,6 +247,26 @@ class SpectralHologramDistiller:
         self.fista_l2_reg = float(fista_l2_reg)
         self.voronoi_temper = float(voronoi_temper)
         self.herding_mix = float(herding_mix)
+        self.residual_weight = float(residual_weight)
+        if self.residual_weight < 0.0:
+            raise ValueError(f"residual_weight must be >= 0, got {residual_weight}")
+        if rff_mode not in ("dual", "single_low", "single_high"):
+            raise ValueError(f"rff_mode must be 'dual'|'single_low'|'single_high', got {rff_mode!r}")
+        self.rff_mode = rff_mode
+        # rff_mode collapses the two scales into one; the dual default is
+        # bit-for-bit the pre-v3.14.4 behaviour (0.75 + 2.10).
+        # The active scale is recorded; _init_projector (and the inline
+        # reservoir-only init) materialise all k channels from it, so a
+        # "single" mode is NOT a dual stack with both halves at one scale.
+        # omega_low/high_scale keep their construction-time values so
+        # external inspection shows the original request; effective
+        # collapse happens in _rff_scale.
+        if self.rff_mode == "single_low":
+            self._rff_scale = float(omega_low_scale)
+        elif self.rff_mode == "single_high":
+            self._rff_scale = float(omega_high_scale)
+        else:
+            self._rff_scale = None
         self.use_residual = bool(use_residual)
         self.critical_threshold = None if critical_threshold is None else float(critical_threshold)
         if self.critical_threshold is not None and tail == "low":
@@ -275,6 +297,22 @@ class SpectralHologramDistiller:
         self.global_guard = bool(global_guard)
         self.global_guard_n = int(global_guard_n)
         self.global_guard_weight = float(global_guard_weight)
+        if self.global_guard and self.global_guard_n > self.M:
+            # v3.15.0: the guard swaps the lowest-weight rows for K-Means
+            # global medoids. The published default (n_global=150) assumes a
+            # 300-row crystal; on a smaller crystal it raised at save time
+            # ("n_global=150 exceeds crystal size 60"), which made the
+            # global_guard presets unusable below 150 rows. Clamp to half the
+            # crystal -- the documented intent (reserve half the budget for
+            # global coverage) -- and say so out loud.
+            clamped = max(1, self.M // 2)
+            warnings.warn(
+                f"global_guard_n={self.global_guard_n} exceeds crystal size "
+                f"{self.M}; clamping to {clamped} (half the crystal). "
+                "Pass global_guard_n explicitly to override.",
+                UserWarning, stacklevel=2,
+            )
+            self.global_guard_n = clamped
         self.rng = np.random.default_rng(random_state)
 
         self.n_seen = 0
@@ -367,10 +405,13 @@ class SpectralHologramDistiller:
         self.y_std = float(np.std(y_batch)) + 1e-8
 
         scale_d = 1.0 / np.sqrt(max(d, 1))
-        k_half = self.k // 2
-        omega_low = self.rng.normal(0, self.omega_low_scale * scale_d, size=(d, k_half))
-        omega_high = self.rng.normal(0, self.omega_high_scale * scale_d, size=(d, self.k - k_half))
-        self.Omega = np.hstack([omega_low, omega_high])
+        if self._rff_scale is not None:
+            self.Omega = self.rng.normal(0, self._rff_scale * scale_d, size=(d, self.k))
+        else:
+            k_half = self.k // 2
+            omega_low = self.rng.normal(0, self.omega_low_scale * scale_d, size=(d, k_half))
+            omega_high = self.rng.normal(0, self.omega_high_scale * scale_d, size=(d, self.k - k_half))
+            self.Omega = np.hstack([omega_low, omega_high])
         self.phase = self.rng.uniform(0, 2 * np.pi, size=(1, self.k))
         self._proj_initialized = True
 
@@ -1019,10 +1060,13 @@ class SpectralHologramDistiller:
                 self.X_mean = np.mean(X_eff0, axis=0)
                 self.X_std = np.std(X_eff0, axis=0) + 1e-8
                 scale_d = 1.0 / np.sqrt(max(d, 1))
-                k_half = self.k // 2
-                omega_low = self.rng.normal(0, self.omega_low_scale * scale_d, size=(d, k_half))
-                omega_high = self.rng.normal(0, self.omega_high_scale * scale_d, size=(d, self.k - k_half))
-                self.Omega = np.hstack([omega_low, omega_high])
+                if self._rff_scale is not None:
+                    self.Omega = self.rng.normal(0, self._rff_scale * scale_d, size=(d, self.k))
+                else:
+                    k_half = self.k // 2
+                    omega_low = self.rng.normal(0, self.omega_low_scale * scale_d, size=(d, k_half))
+                    omega_high = self.rng.normal(0, self.omega_high_scale * scale_d, size=(d, self.k - k_half))
+                    self.Omega = np.hstack([omega_low, omega_high])
                 self.phase = self.rng.uniform(0, 2 * np.pi, size=(1, self.k))
                 Z_B, U_B = self._spectral_transform(X_batch, update_state=True)
                 self.Psi_sum += U_B.T @ U_B
@@ -1106,7 +1150,8 @@ class SpectralHologramDistiller:
             y_z = np.abs(y_norm)
         # np.atleast_1d: a single-row batch squeezes y_z to a 0-d array, which
         # would later crash np.concatenate on the buffered phase scores.
-        phase_score = np.atleast_1d((res_ratio if self.use_residual else 0.0) + 2.0 * (y_z ** 2))
+        res_w = self.residual_weight if self.use_residual else 0.0
+        phase_score = np.atleast_1d((res_w * res_ratio) + 2.0 * (y_z ** 2))
 
         # Background accumulator for the passport reference: keep the sketch
         # rows that did NOT trigger the phase-peak score. The cut is the same

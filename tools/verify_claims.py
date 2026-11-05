@@ -32,6 +32,15 @@ def check(name, actual, expected, tol=0.011):
     if not ok:
         failures.append(name)
 
+def check_min(name, actual, minimum):
+    """Assert actual >= minimum (one-sided bound)."""
+    global checks
+    checks += 1
+    ok = float(actual) >= float(minimum)
+    print(f"{'PASS' if ok else 'FAIL'}  {name:52s} actual={actual!r:>12} min={minimum!r}")
+    if not ok:
+        failures.append(name)
+
 def check_text(name, needle, haystack=PAPER):
     global checks
     checks += 1
@@ -307,7 +316,7 @@ for needle in [
     check_absent("paper stale " + needle, needle)
 
 for text in [
-    "# Spectral Hologram Distiller (SHD v3.14.2)",
+    "# Spectral Hologram Distiller (SHD v3.15.0)",
     "### 10. NASA C-MAPSS FD001: remaining useful life on the LOW tail",
     "DomainBank", "passport_recalibrate", 'weighting="uniform"',
     # "196.0" lived in the paper only (PM2.5 guard KRR-crit); the README
@@ -363,16 +372,16 @@ pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 # v3.13.2: SHD_VERSION in shd/distiller.py is the single source of truth;
 # shd/__init__.py re-exports it (__version__ = SHD_VERSION) instead of
 # duplicating the literal (the duplication is what drifted in v3.10/v3.11).
-check_text("version source 3.14.2", 'SHD_VERSION = "3.14.2"', distiller_src)
+check_text("version source 3.15.0", 'SHD_VERSION = "3.15.0"', distiller_src)
 check_text("version re-export", "__version__ = SHD_VERSION", version)
-check_text("pyproject 3.14.2", 'version = "3.14.2"', pyproject)
+check_text("pyproject 3.15.0", 'version = "3.15.0"', pyproject)
 # The three version carriers must agree; this is the check that would have
 # caught the v3.10.0/v3.11.0 drift before it reached the README title.
 check("version carriers agree",
-      1 if ('SHD_VERSION = "3.14.2"' in distiller_src
+      1 if ('SHD_VERSION = "3.15.0"' in distiller_src
             and "__version__ = SHD_VERSION" in version
-            and 'version = "3.14.2"' in pyproject
-            and "SHD v3.14.2" in README) else 0, 1, 0)
+            and 'version = "3.15.0"' in pyproject
+            and "SHD v3.15.0" in README) else 0, 1, 0)
 
 # --------------------------------------------- presets + gate solver (v3.14.1)
 sys.path.insert(0, str(ROOT))
@@ -395,12 +404,48 @@ check("preset global_first params",
           "high_band_ratio": 0.26, "tail_quantile": 84.0} else 0, 1, 0)
 check("preset pm25_global params",
       1 if _shd.apply_preset("pm25_global") == {"global_guard": True} else 0, 1, 0)
-check("preset count", len(_shd.PRESETS), 6, 0)
+check("preset count", len(_shd.PRESETS), 10, 0)
+check("preset sparse_auto params",
+      1 if _shd.apply_preset("sparse_auto") == {
+          "tail_quantile": 97.0, "global_guard": True,
+          "high_band_ratio": 0.26} else 0, 1, 0)
+check("preset critical_first_no_residual params",
+      1 if _shd.apply_preset("critical_first_no_residual") == {
+          "residual_weight": 0.0, "high_band_ratio": 0.65} else 0, 1, 0)
+check("preset single_scale_low params",
+      1 if _shd.apply_preset("single_scale_low") == {"rff_mode": "single_low"} else 0, 1, 0)
+check("preset single_scale_high params",
+      1 if _shd.apply_preset("single_scale_high") == {"rff_mode": "single_high"} else 0, 1, 0)
 portfolio_src = (ROOT / "shd" / "portfolio.py").read_text(encoding="utf-8")
 check_text("gate solver budget 5000", "max_iter=5000", portfolio_src)
 check_text("gate solver fallback recorded", "gate_solver_", portfolio_src)
 check_text("readme documents the logit-C fix", "tune-logit-c", README)
 check_text("readme states the tuned-logit verdict", "Tuned logit beats tuned HGB", README)
+
+# ------------------------------------- v3.15.0 trade-off / honesty artifacts
+res = load("bench_residual_tradeoff_results.json")
+for ds in ("reactor", "SC"):
+    cfgs = res[ds]["configs"]
+    default_crit = float(np.median([r["krr_rmse_crit"] for r in cfgs["rw_1.0_default"]["records"]]))
+    rw0_crit = float(np.median([r["krr_rmse_crit"] for r in cfgs["rw_0"]["records"]]))
+    # residual trigger HURTS the critical regime: rw_0 must be <= default
+    check(f"{ds} residual rw_0 not worse than default", 1 if rw0_crit <= default_crit else 0, 1, 0)
+    cf = cfgs["critical_first_no_residual"]
+    cf_crit = float(np.median([r["krr_rmse_crit"] for r in cf["records"]]))
+    check(f"{ds} critical_first_no_residual beats default crit", 1 if cf_crit < default_crit else 0, 1, 0)
+    check(f"{ds} critical_first_no_residual wilcoxon wins >= 8/10",
+          cf["wilcoxon_vs_default"]["wins"], 10, 2)
+
+hard = load("bench_radar_hard_results.json")
+for b in hard["by_batch"]:
+    agg = hard["by_batch"][b]["agg"]
+    # the abrupt control must stay perfect (the easy task is still perfect)
+    check(f"radar_hard B={b} abrupt control AUC ~ 1", agg["abrupt_control"]["auc_median"], 1.0, 0.002)
+    # graded drift must stay strongly ranked even where the fixed tau misses it
+    for name in ("gradual_alpha0.3", "gradual_alpha0.5"):
+        check_min(f"radar_hard B={b} {name} AUC >= 0.95", agg[name]["auc_median"], 0.95)
+    # partial windows are the weak spot: document it, do not hide it
+    check_min(f"radar_hard B={b} partial_frac0.25 AUC >= 0.9", agg["partial_frac0.25"]["auc_median"], 0.9)
 
 print(f"\n{checks} checks, {len(failures)} failures")
 if failures:

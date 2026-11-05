@@ -8,3 +8,6 @@ build/
 .bench_tmp/
 .venv/
 _v2venv/
+_tmp_cli*.npz
+*.hologram.npz
+.tmp_cli*

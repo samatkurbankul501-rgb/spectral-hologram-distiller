@@ -17,6 +17,7 @@ import sys
 import numpy as np
 
 from .distiller import HologramCrystalLoader, SpectralHologramDistiller
+from .presets import PRESETS as _PRESET_CHOICES
 
 
 def _load_tabular(path: str, target_col: int | None = None, delimiter: str | None = None):
@@ -133,11 +134,54 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
 def cmd_distill(args: argparse.Namespace) -> int:
     X, y = _load_tabular(args.input, target_col=args.target_col)
+    # v3.15.0: a named preset may set the operating point; an explicit CLI
+    # flag always wins over the preset for the same knob.
+    from .presets import apply_preset as _apply_preset
+
+    preset_params = {}
+    if getattr(args, "preset", None):
+        preset_params = dict(_apply_preset(args.preset))
+    # CLI flags are None when unset; preset value wins, else constructor
+    # logic fills a concrete number. An explicit flag (even one equal to
+    # the old default, e.g. 84.0) is a real flag and overrides the preset.
+    tail_quantile = args.tail_quantile
+    if "tail_quantile" in preset_params:
+        if tail_quantile is None:
+            tail_quantile = preset_params.pop("tail_quantile")
+        else:
+            preset_params.pop("tail_quantile", None)
+    elif tail_quantile is None:
+        tail_quantile = 84.0
+    high_band_ratio = args.high_band_ratio
+    if "high_band_ratio" in preset_params:
+        if high_band_ratio is None:
+            high_band_ratio = preset_params.pop("high_band_ratio")
+        else:
+            preset_params.pop("high_band_ratio", None)
+    elif high_band_ratio is None:
+        high_band_ratio = 0.26
+    global_guard = bool(args.global_guard)
+    if "global_guard" in preset_params and not args.global_guard:
+        global_guard = bool(preset_params.pop("global_guard"))
+    else:
+        preset_params.pop("global_guard", None)
+    residual_weight = args.residual_weight
+    if residual_weight is None:
+        residual_weight = preset_params.pop("residual_weight", 1.0)
+    else:
+        preset_params.pop("residual_weight", None)
+    rff_mode = args.rff_mode
+    if rff_mode is None:
+        rff_mode = preset_params.pop("rff_mode", "dual")
+    else:
+        preset_params.pop("rff_mode", None)
+    # Any remaining preset key is a knob the CLI does not expose yet; it is
+    # still honoured, because the preset is a measured operating point.
     distiller = SpectralHologramDistiller(
         crystal_size=args.crystal_size,
-        high_band_ratio=args.high_band_ratio,
+        high_band_ratio=high_band_ratio,
         sketch_dim=args.sketch_dim,
-        tail_quantile=args.tail_quantile,
+        tail_quantile=tail_quantile,
         phase_kappa=args.phase_kappa,
         random_state=args.seed,
         max_init_buffer=args.max_init_buffer,
@@ -146,6 +190,10 @@ def cmd_distill(args: argparse.Namespace) -> int:
         adaptive_y_stats=args.adaptive_y_stats,
         on_nonfinite=args.on_nonfinite,
         passport_reference=args.passport_reference,
+        global_guard=global_guard,
+        residual_weight=residual_weight,
+        rff_mode=rff_mode,
+        **preset_params,
     )
     B = max(1, int(args.batch_size))
     for i in range(0, len(X), B):
@@ -229,9 +277,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_dis.add_argument("--output", "-o", required=True, help="Output .hologram.npz path")
     p_dis.add_argument("--target-col", type=int, default=None, help="Target column index (omit for label-free mode)")
     p_dis.add_argument("--crystal-size", type=int, default=300)
-    p_dis.add_argument("--high-band-ratio", type=float, default=0.26)
+    p_dis.add_argument("--high-band-ratio", type=float, default=None)
     p_dis.add_argument("--sketch-dim", type=int, default=256)
-    p_dis.add_argument("--tail-quantile", type=float, default=84.0)
+    p_dis.add_argument("--tail-quantile", type=float, default=None)
     p_dis.add_argument("--phase-kappa", type=float, default=3.2)
     p_dis.add_argument("--batch-size", type=int, default=2500)
     p_dis.add_argument("--max-init-buffer", type=int, default=8192)
@@ -247,6 +295,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_dis.add_argument(
         "--on-nonfinite", choices=("raise", "drop"), default="raise",
         help="NaN/Inf policy: fail loudly (default) or skip affected rows",
+    )
+    p_dis.add_argument(
+        "--preset", default=None, choices=sorted(_PRESET_CHOICES),
+        help=(
+            "Named measured operating point from shd.presets (e.g. "
+            "sparse_auto, critical_first_no_residual). An explicit flag "
+            "for the same knob overrides the preset."
+        ),
+    )
+    p_dis.add_argument(
+        "--residual-weight", type=float, default=None,
+        help=(
+            "Weight of the residual term in the phase-peak score. "
+            "0.0 keeps the y-z trigger only (critical-first; v3.15.0). "
+            "Default: constructor default (1.0)."
+        ),
+    )
+    p_dis.add_argument(
+        "--rff-mode", default=None, choices=("dual", "single_low", "single_high"),
+        help=(
+            "Bochner frequency layout: 'dual' (published default), "
+            "'single_low' or 'single_high' (ablation probes, v3.15.0)."
+        ),
+    )
+    p_dis.add_argument(
+        "--global-guard", action="store_true",
+        help="Swap the lowest-weight rows for K-Means global medoids (PM2.5 guard).",
     )
     p_dis.add_argument("--seed", type=int, default=42)
     p_dis.add_argument(
