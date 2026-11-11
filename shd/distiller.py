@@ -1517,6 +1517,15 @@ class SpectralHologramDistiller:
                 UserWarning, stacklevel=2,
             )
 
+        # A stream that ends mid-interval never triggered its last rebuild, so
+        # the final regime has no dedicated cells (the online snap only moves
+        # existing centers by center_lr). The reservoir holds the whole stream,
+        # so rebuild once from it before committing the medoids. Gated on
+        # interval>0 AND rows arrived since the last rebuild: the default
+        # interval=0 path never collects a reservoir and stays bit-for-bit.
+        if self.lattice_rebuild_interval > 0 and self._rows_since_rebuild > 0:
+            self._rebuild_lattice_from_reservoir()
+
         order = np.argsort(self.counts)[::-1]
         self.crystal_X = self.med_X[order].copy()
         # reshape(-1), not squeeze(): a single-medoid lattice would otherwise

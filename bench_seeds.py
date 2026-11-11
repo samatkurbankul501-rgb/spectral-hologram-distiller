@@ -289,6 +289,11 @@ def run_dataset(key, seeds, m, batch, model_seed, include_kt=True, checkpoint_pa
     t0 = time.perf_counter()
     if key == "superconduct":
         X_raw, y_raw, crit_threshold, title = load_superconduct()
+        if X_raw.shape[1] != 81:
+            raise RuntimeError(
+                "UCI Superconductivity fetch failed (California-housing fallback); "
+                "aborting so the fallback cannot overwrite the headline artifact "
+                "(same guard as bench_gaps.py / bench_frontier.py)")
     else:
         X_raw, y_raw, crit_threshold, title = load_reactor()
 

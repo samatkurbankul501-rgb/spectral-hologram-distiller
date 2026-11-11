@@ -108,9 +108,19 @@ class DomainBank:
             )
         reports = {i: self.loaders[i].check_domain_shift(X, streaming=streaming)
                    for i in candidates}
-        best = min(reports, key=lambda i: reports[i]["bw_distance"])
+        # Prefer a domain that ACCEPTS the window; only if none accepts, fall
+        # back to the closest. Rank by relative margin bw/threshold, not raw bw:
+        # BW distance grows ~sqrt(rank) and each threshold is rank-scaled or
+        # calibrated, so raw distances are incomparable across a mixed-rank bank
+        # (a low-rank crystal used to win on raw distance and report a shift even
+        # though another domain accepted the window).
+        accepting = [i for i in reports if not reports[i]["is_shifted"]]
+        pool = accepting if accepting else list(reports)
+        best = min(pool, key=lambda i: reports[i]["bw_distance"]
+                   / max(reports[i]["threshold"], 1e-12))
         result = dict(reports[best])
         result["domain_index"] = best
+        result["is_shifted"] = not accepting
         result["bw_distances"] = [reports[i]["bw_distance"] if i in reports else None
                                   for i in range(len(self.loaders))]
         return result
