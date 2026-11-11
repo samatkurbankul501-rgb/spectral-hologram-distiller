@@ -1,0 +1,86 @@
+{
+ "dataset": "reactor-drift (train sorted by y, hot regime last)",
+ "crit_threshold": 6.297636999032604,
+ "seeds": [
+  0,
+  1,
+  2
+ ],
+ "arms": {
+  "0": {
+   "records": [
+    {
+     "krr_rmse_all": 1.7146383052274792,
+     "krr_rmse_crit": 7.498925492406861,
+     "krr_r2": 0.1339918681680089,
+     "gbm_rmse_all": 1.9473319553843411,
+     "gbm_rmse_crit": 8.202637014097519,
+     "gbm_r2": -0.11700960586929288,
+     "rare_captured": 0,
+     "seed": 0
+    },
+    {
+     "krr_rmse_all": 1.7527638464004993,
+     "krr_rmse_crit": 7.532740269407755,
+     "krr_r2": 0.09505175960076029,
+     "gbm_rmse_all": 1.9900991862810788,
+     "gbm_rmse_crit": 8.335410251849536,
+     "gbm_r2": -0.1666118162383865,
+     "rare_captured": 0,
+     "seed": 1
+    },
+    {
+     "krr_rmse_all": 1.7253329281854157,
+     "krr_rmse_crit": 7.451414466776708,
+     "krr_r2": 0.12315516405450733,
+     "gbm_rmse_all": 1.987417854304063,
+     "gbm_rmse_crit": 8.370886274339272,
+     "gbm_r2": -0.16347029816093062,
+     "rare_captured": 0,
+     "seed": 2
+    }
+   ],
+   "krr_rmse_crit_median": 7.498925492406861,
+   "krr_rmse_all_median": 1.7253329281854157,
+   "rare_captured_median": 0.0
+  },
+  "1500": {
+   "records": [
+    {
+     "krr_rmse_all": 1.0476778007835699,
+     "krr_rmse_crit": 3.6183171582911284,
+     "krr_r2": 0.676680119062759,
+     "gbm_rmse_all": 0.6040816359149734,
+     "gbm_rmse_crit": 1.0176025518316183,
+     "gbm_r2": 0.8925099676872637,
+     "rare_captured": 21,
+     "seed": 0
+    },
+    {
+     "krr_rmse_all": 1.0386535118657532,
+     "krr_rmse_crit": 3.61012199033189,
+     "krr_r2": 0.6822260338700206,
+     "gbm_rmse_all": 0.6542119206732225,
+     "gbm_rmse_crit": 1.935384237592648,
+     "gbm_r2": 0.8739293960551014,
+     "rare_captured": 16,
+     "seed": 1
+    },
+    {
+     "krr_rmse_all": 1.0077904514429608,
+     "krr_rmse_crit": 3.3764480423605123,
+     "krr_r2": 0.7008304383453317,
+     "gbm_rmse_all": 0.7141589099737102,
+     "gbm_rmse_crit": 2.4096280605229867,
+     "gbm_r2": 0.8497665486591813,
+     "rare_captured": 23,
+     "seed": 2
+    }
+   ],
+   "krr_rmse_crit_median": 3.61012199033189,
+   "krr_rmse_all_median": 1.0386535118657532,
+   "rare_captured_median": 21.0
+  }
+ },
+ "elapsed_sec": 36.72287250000227
+}

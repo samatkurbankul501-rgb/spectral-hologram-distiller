@@ -480,8 +480,8 @@ README_NEEDLE_COUNTS = {
     '59.0': 1,
     '85.3': 1,
     '993.0': 3,
-    'DomainBank': 7,
-    'PM2.5': 10,
+    'DomainBank': 8,
+    'PM2.5': 11,
     'passport_recalibrate': 4,
     'weighting="uniform"': 2,
     '13.45': 4,
@@ -924,6 +924,15 @@ check("deltas GBM all wins", _dlw["deltas_on_vs_off_gbm_rmse_all"]["wins"], 6, 0
 check("deltas GBM all p", _dlw["deltas_on_vs_off_gbm_rmse_all"]["p_value"], 0.0107, 0.001)
 check_digest("deltas artifact digest", artifact_digest(_dl),
              "ef7e8252ba0578c32b07280f702474c5b8816b79c242cb143f541b9bc9231256")
+
+# ----------------------------- drift late-regime capture (finalize rebuild)
+_dr = load("bench_drift_rebuild_results.json")
+check("drift interval=0 rare (blind)", _dr["arms"]["0"]["rare_captured_median"], 0.0, 0.0)
+check("drift interval=1500 rare", _dr["arms"]["1500"]["rare_captured_median"], 21.0, 0.0)
+check("drift interval=0 crit", _dr["arms"]["0"]["krr_rmse_crit_median"], 7.499, 0.01)
+check("drift interval=1500 crit", _dr["arms"]["1500"]["krr_rmse_crit_median"], 3.610, 0.01)
+check_digest("drift rebuild artifact digest", artifact_digest(_dr),
+             "405adbe90138aef848b052421612039d0e731ef8672faa03bfb24041bf86db52")
 
 # ------------------------------------ metro watch + 250k stress (backed pins)
 _mw = load("bench_metro_watch_v2_results.json")

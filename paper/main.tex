@@ -97,6 +97,8 @@ Points exceeding the 84th percentile threshold of $s$ are flagged as critical ca
 
 \textbf{Streaming Online Update:} As subsequent batches arrive, points falling into cell $j$ update centroid locations with an adaptive learning rate $\eta = \min(0.25, n_{\text{new}}/n_{\text{cell}})$. If a candidate row within cell $j$ has lower quantization error to the centroid than the active medoid, it replaces it; the phase score is used for band allocation, not for medoid replacement.
 
+\textbf{Late-Regime Capture via Reservoir Rebuild:} The online update only nudges existing centroids, so a regime that arrives after warm-up can remain unrepresented. When periodic rebuilds are enabled (\texttt{lattice\_rebuild\_interval}$>0$), SHD retains a bounded two-stratum reservoir (a uniform peak sample plus recent background) and re-seeds the lattice from it; at crystallization it rebuilds once more so a stream ending mid-interval still captures its final regime. On a synthetic drift stream whose hot regime arrives last (reactor, train sorted by ascending $y$, 3 seeds), enabling rebuilds raises critical-regime capture from $0$ to $21$ medoids and lowers critical KRR RMSE from $7.50$ to $3.61$ (\texttt{bench\_drift\_rebuild\_results.json}). The default \texttt{lattice\_rebuild\_interval}$=0$ is preserved bit-for-bit for reproducibility of the published artifacts.
+
 \subsection{Coreset Rebalancing via Nonnegative FISTA Herding}
 Rather than assigning uniform weights $1/M$, SHD solves at crystallization time for empirical coreset weights $\boldsymbol{\gamma}^* \in \mathbb{R}_+^M$ such that the weighted coreset feature covariance matches the full-stream covariance $\hat{\boldsymbol{\Psi}} = \boldsymbol{\Psi} / n_{\text{seen}}$:
 \begin{equation}

@@ -1,5 +1,21 @@
 # Spectral Hologram Distiller (SHD v3.15.2)
 
+> **2026-11-11 metric-growth follow-up (confirmed, shipped):** two correctness
+> fixes that raise real metrics without touching the published default path.
+> (1) **`finalize_crystal()` rebuilds the lattice from the reservoir** when
+> `lattice_rebuild_interval>0` and rows arrived since the last rebuild, so a
+> stream ending mid-interval captures its final regime instead of committing the
+> warm-up prefix. On a hot-last drift stream: rare capture **0 → 21**, critical
+> KRR RMSE **7.50 → 3.61** (`bench_drift_rebuild_results.json`, 3 seeds;
+> `interval=0` stays blind by design, bit-for-bit). (2) **`DomainBank` routes by
+> relative margin `bw/threshold`** (raw BW is rank-incomparable) and prefers a
+> domain that accepts the window — a mixed-rank bank no longer flags a shift when
+> another domain accepts. Also `bench_seeds` aborts on the California-housing
+> fallback so a failed fetch cannot overwrite the headline artifact. Investigated,
+> not shipped: adaptive band membership on the `critical_threshold` path (~0
+> measured gain) and the portfolio SHD-C critical-aware expert (deferred pending
+> a full SC/PM2.5 regen). 4 regression tests; gate 516 → 521, suite 257 → 261.
+
 > **v3.15.2 (2026-11-11): the 2026-11-07 bug hunt (seven defects), the
 > 2026-11-08 follow-up hunt (seven more) and the 2026-11-11 honesty audit,
 > released together.** Every finding below was
@@ -74,8 +90,8 @@
 > its 10-seed CI replication, and the gate pins both (plus five forbidden
 > fabricated strings). The CI full tier's NumPy pin now follows the build
 > matrix; the shared constraint file had pinned NumPy 1.24 under Python
-> 3.12, where it has no wheel. The claim gate stands at 516 checks, the
-> suite at 257 tests.
+> 3.12, where it has no wheel. The claim gate stands at 521 checks, the
+> suite at 261 tests.
 > **v3.15.0 (2026-11-05): CLI preset-flag precedence fix, true single-scale RFF,
 > tradeoff benches.** An explicit CLI constructor flag now takes precedence over
 > `--preset`; the RFF sketch's single-scale construction was corrected; and the
@@ -1238,6 +1254,16 @@ when global fit still matters.
   passport routing is only exact when regimes are meaningfully separated
   (accuracy 1.00 at drift ≥ 0.5, 0.60 when regimes are nearly identical).
   Source: `bench_bank_scaling_results.json`.
+
+- **Late regimes need a rebuild — and a finalize-time one.** With the default
+  `lattice_rebuild_interval=0` the lattice is frozen on the warm-up prefix, so a
+  regime that arrives LAST gets no medoids. Enabling `interval>0` rebuilds during
+  streaming, and `finalize_crystal()` now rebuilds once more from the reservoir so
+  a stream ending mid-interval still captures its tail. On a hot-last drift stream
+  (reactor train sorted by ascending y): rare capture **0 → 21** and critical KRR
+  RMSE **7.50 → 3.61** going from `interval=0` to `interval=1500` (3 seeds). The
+  default `interval=0` is unchanged (bit-for-bit). Source:
+  `bench_drift_rebuild_results.json`.
 
 - **Single-passport healing is a three-way trade-off:** the default blend can
   leave *both* domains uncalibrated on a strong shift; `passport_recalibrate=True`
