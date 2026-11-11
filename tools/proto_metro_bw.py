@@ -29,7 +29,9 @@ from shd import HologramCrystalLoader
 from shd_watch import (calibrate_tau, detrended_scores, episodes,
                        load_minute_table, slice_range, window_bounds, window_scores)
 
-NPZ = r"C:\Users\User\Downloads\New folder\_datasets\metro_minute_cache.npz"
+_DATASETS = os.environ.get(
+    "SHD_DATASETS", os.path.normpath(os.path.join(ROOT, "..", "..", "_datasets")))
+NPZ = os.path.join(_DATASETS, "metro_minute_cache.npz")
 INC = os.path.join(ROOT, "metro_incidents.json")
 LEARN = ("2020-02-01", "2020-03-15")
 CALIB = ("2020-03-15", "2020-04-10")

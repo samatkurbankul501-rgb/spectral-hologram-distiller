@@ -74,23 +74,38 @@
 > its 10-seed CI replication, and the gate pins both (plus five forbidden
 > fabricated strings). The CI full tier's NumPy pin now follows the build
 > matrix; the shared constraint file had pinned NumPy 1.24 under Python
-> 3.12, where it has no wheel. The claim gate stands at 474 checks, the
-> suite at 247 tests.
+> 3.12, where it has no wheel. The claim gate stands at 516 checks, the
+> suite at 257 tests.
+> **v3.15.0 (2026-11-05): CLI preset-flag precedence fix, true single-scale RFF,
+> tradeoff benches.** An explicit CLI constructor flag now takes precedence over
+> `--preset`; the RFF sketch's single-scale construction was corrected; and the
+> high_band_ratio / phase_kappa tradeoff benches were added.
+> **v3.14.4 (2026-11-04): thread-safe radar, e-process alarm, larger panel.**
+> Loader read/mutate paths share a re-entrant lock so concurrent radar/heal calls
+> serialize; an opt-in e-process gives an anytime-valid panel verdict; the panel
+> grew from 4 to 8 terms (autocorr lag-2, rank-DFS Spearman). Defaults bit-identical.
+> **v3.14.3 (2026-11-04): panel radar + global guard.** A fused panel score
+> (BW + mean-shift + MMD + energy) with `calibrate_threshold_panel`;
+> `save_hologram(global_guard=True)` with a loud `n_global` bounds check; the
+> `pm25_global` preset, a non-destructive `migrate` CLI and the 250k stress artifact.
+> **v3.14.2 (2026-11-04): label-free honesty repairs.** Label-free crystals carry
+> a `label_free` marker so heal's injected rows stay labelled; the CLI heal default
+> became non-destructive (`*_healed` sibling, input intact); version carriers
+> aligned under one `SHD_VERSION` source of truth.
 > **v3.14.1 (2026-10-24): measured Scania logit diagnosis, machine-readable
 > presets, and an honest gate-solver budget.** Three tails from the v3.14.0
 > weakness map, each closed by measurement:
 > (1) **The Scania logit failure is a regularization failure, not a crystal
-> failure** — measured, not asserted. A 5-seed probe on the same SHD crystals
-> (`_probe_scania_logit.py`, oracle-logit reproduces the README cost 770
-> bit-for-bit) found the historical hand (logit `C=1.0`, sklearn default) at
-> aucV 0.831, while a validation-tuned `C` reaches aucV 0.974 — within noise of
-> the 0.962 oracle. The best `C` was `0.01` (two orders of magnitude below the
-> sklearn default) in every seed; a "smooth the class weights" hypothesis was
-> tested and *refuted* (aucV 0.799 — worse). At the 10:1 cost scenario
-> `--tune-logit-c` turns SHD+logit into the **best hand of the scenario**
-> (median cost 840.5 vs 993.0 SHD+HGB; artifact
-> `bench_scania_cost_tunedC_results.json`), but at the official 500:10 metric
-> tuned logit still does not catch HGB — recorded, not hidden (below in §8).
+> failure.** The historical hand uses logit `C=1.0` (sklearn default);
+> validation-tuning `C` (`--tune-logit-c`) on a held-out slice (grid 0.01–10.0, two orders of
+> magnitude stronger regularization) turns SHD+logit into the **best hand of
+> the 10:1 cost scenario** (median cost 840.5 vs 993.0 SHD+HGB; 10 seeds,
+> artifact `bench_scania_cost_tunedC_results.json`). At the official 500:10
+> metric tuned logit still does not catch HGB — recorded, not hidden (below
+> in §8). (An earlier revision quoted validation-AUC figures and a refuted
+> "smooth class weights" variant from a 5-seed `_probe_scania_logit.py` probe;
+> that script and its AUC artifact were never committed, so those unbacked
+> numbers have been removed — the persisted cost result above is the evidence.)
 > The full 10-seed runs are not yet significant against the K-Means/Random
 > baselines (8/10, p=0.0625 and 7/10, p=0.16) — 10 seeds cannot make that
 > claim; the HGB baseline wins stay significant (8/10, p=0.0195).
@@ -372,7 +387,7 @@ X_u, y_u, w_u = loader.get_training_data(weighting="uniform")  # critical-only
 # v3.13.1+: every crystal is versioned — schema + package version travel with
 # the file; summary() shows them, old crystals warn that their provenance
 # predates the schema contract:
-print(ld.summary()["schema_version"], ld.summary()["shd_version"])  # 1, 3.14.0
+print(loader.summary()["schema_version"], loader.summary()["shd_version"])  # 1, 3.15.2
 ```
 
 ## CLI (`python -m shd` / `shd`)
@@ -706,10 +721,10 @@ test, 1.45% burst rows), paired crystals per seed (identical except
 | Metric (median over 20 seeds) | deltas off | deltas on | Random coreset | Paired Wilcoxon (on vs off) |
 | :--- | :---: | :---: | :---: | :---: |
 | Burst rows captured in crystal (of 93) | 15.0 | **17.0** | 3.0 | 12/20, $p=0.12$ (n.s.) |
-| GBM RMSE on test burst rows | 3.77 | **3.50** | — | **14/20 wins, $p=0.036$** |
+| GBM RMSE on test burst rows | 3.71 | **3.48** | — | **15/20 wins, $p=0.044$** |
 | KRR RMSE on test burst rows | 4.15 | 4.18 | — | 10/20, $p=0.62$ (n.s.) |
 | KRR RMSE all (background cost) | **0.554** | 0.610 | — | 3/20, $p=4.8\times10^{-5}$ (deltas worse) |
-| GBM RMSE all (background cost) | **0.710** | 0.778 | — | 7/20, $p=3.7\times10^{-3}$ (deltas worse) |
+| GBM RMSE all (background cost) | **0.724** | 0.803 | — | 6/20, $p=1.1\times10^{-2}$ (deltas worse) |
 
 Honest verdict: `include_deltas` is a *targeted* mode, not a free win. It
 significantly improves GBM accuracy on the transient regime and lifts burst
@@ -901,15 +916,16 @@ linear-model medians favour K-Means. Deployment needs a pre-agreed cost model
 and fresh validation on the target equipment.
 
 **Why the historical logit arm failed — and the tuned rerun (v3.14.1).** The
-logit rows above use the sklearn default `C=1.0`. A 5-seed probe on the same
-SHD crystals measured aucV 0.831 for that hand against 0.974 for a
-validation-tuned `C` (oracle 0.962); the best `C` was `0.01` in every seed —
-two orders of magnitude stronger regularization than the default. A "smooth the
-class weights" variant was tested and *refuted* (aucV 0.799, the worst of the
-three hands): the crystal was never the bottleneck. Rerun with
-`python bench_scania_cost.py --tune-logit-c` (`C` tuned on the same held-out
-validation slice, grid 0.01–10.0; 10 seeds; artifact
-`bench_scania_cost_tunedC_results.json`):
+logit rows above use the sklearn default `C=1.0`. Validation-tuning `C` on a
+held-out slice (grid 0.01–10.0; 10 seeds; artifact
+`bench_scania_cost_tunedC_results.json`) strengthens the regularization by
+two orders of magnitude and turns SHD+logit into the best hand of the 10:1
+cost scenario (cost table below): the crystal was never the
+bottleneck. (An earlier revision quoted validation-AUC figures for the default,
+tuned and oracle hands plus a refuted "smooth class weights" variant, from a
+5-seed probe that was never committed; those AUC numbers are unbacked by any
+committed artifact and have been removed.) Rerun with
+`python bench_scania_cost.py --tune-logit-c`:
 
 | Coreset (300 rows) | Model | Failures missed | False alarms | Recall | Precision | Cost = 10·FN + 1·FP |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
@@ -1059,7 +1075,7 @@ The feature-z baseline keeps its 4/4 with 5.5–17.3 days of lead, but at
 1.74 unmatched FA/month it exceeds the calibrated 1.0 budget — under the
 protocol's budget discipline it is not deployable as-is. The combined radar
 matches its detection count at less than half the alarm rate. Crystal:
-55.4 KB, learn 6.8 s, watch scan 47.9 s.
+55.5 KB, learn 6.2 s, watch scan 36.8 s.
 
 For the pure passport the picture is unchanged: the radar is not completely
 blind to the faults — the single largest detrended deviation of the entire
@@ -1259,10 +1275,12 @@ when global fit still matters.
   with `calibrate_threshold` / `calibrate_threshold_ms`.
 - **250k×100 dim scaling (+ honest throughput cost).** Synthetic probe
   (`bench_stress250k_results.json`, 225k train / 25k hold-out, d=100): SHD
-  fit 28.6 с (MiniBatchKMeans 5.14 с, ~5.6×), finalize 0.08 с, peak 71.7 МБ,
-  кристалл 300, артефакт 225.2 КБ, rel_err 0.3468, panel-radar 64 rows
-  117.7 мс (MBK predict 0.74 мс, ~160×). SHD не чемпион по throughput — он
-  дороже по фиту и предсказанию, но держит параметр budget + паспорт +
-  радар; выигрыш — в критических режимах и сдвигах, а не в throughput.
-  Kernel Thinning на 250k×100dim (O(n²) batch) не мерялся здесь — поле
-  движется к near-linear COMPRESS-вариантам.
+  fit 28.6 s, finalize 0.08 s, peak 71.7 MB, crystal 300, artifact 225.2 KB,
+  rel_err 0.3468, panel-radar 64 rows 117.7 ms. SHD is not a throughput
+  champion — it carries the budget parameter + passport + radar on top of
+  the coreset, so the win is in critical regimes and shifts, not raw speed.
+  (Earlier revisions quoted a MiniBatchKMeans fit/predict comparison and
+  ~5.6× / ~160× ratios here; those MBK figures were never persisted to the
+  artifact and the probe script is not in the repo, so they have been removed
+  as unbacked. Kernel Thinning at 250k×100dim (O(n²) batch) was not measured
+  here — the field is moving to near-linear COMPRESS variants.)

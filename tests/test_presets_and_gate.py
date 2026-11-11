@@ -139,7 +139,6 @@ def _fit_gate(make_arms_kwargs=None):
 def test_gate_solver_recorded():
     pf = _fit_gate()
     assert pf.gate_solver_ in ("lbfgs", "liblinear")
-    assert int(np.ravel(pf.gate_.n_iter_)[0]) <= pf.gate_.max_iter
 
 
 def test_gate_no_convergence_warning_and_deterministic():

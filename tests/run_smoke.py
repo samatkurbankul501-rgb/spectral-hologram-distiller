@@ -15,6 +15,12 @@ import numpy as np  # noqa: E402
 
 import test_smoke as ts  # noqa: E402
 
+try:
+    import pytest as _pytest
+    _SKIP_EXC = (ts.SmokeSkip, _pytest.skip.Exception)
+except ImportError:
+    _SKIP_EXC = (ts.SmokeSkip,)
+
 
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="shd_smoke_")
@@ -77,6 +83,7 @@ def main() -> int:
         "test_delta_width_ambiguity_is_rejected",
     ]
     failures = []
+    skips = []
     for name in test_names:
         fn = getattr(ts, name)
         try:
@@ -84,14 +91,19 @@ def main() -> int:
                 fn()
             else:
                 fn(distilled)
-            print(f"PASS  {name}")
+        except _SKIP_EXC as exc:
+            skips.append(name)
+            print(f"SKIP  {name} ({exc})")
         except Exception:
             failures.append(name)
             print(f"FAIL  {name}")
             traceback.print_exc()
+        else:
+            print(f"PASS  {name}")
 
     total = len(test_names)
-    print(f"\n{total - len(failures)}/{total} passed")
+    passed = total - len(failures) - len(skips)
+    print(f"\n{passed}/{total} passed, {len(skips)} skipped")
     return 1 if failures else 0
 
 

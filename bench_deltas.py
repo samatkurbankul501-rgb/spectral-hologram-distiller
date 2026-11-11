@@ -111,7 +111,11 @@ def eval_models(X_c, y_c, w_c, scaler, model_seed, Z_te, y_te, Z_te_b, y_te_b, r
     gbm = HistGradientBoostingRegressor(
         max_iter=120, max_leaf_nodes=20, min_samples_leaf=5, random_state=model_seed
     )
-    gbm.fit(X_c, y_c, sample_weight=w_c)
+    # Fit on the SAME scaled space the predictions use (Z_te). HGBR is
+    # invariant to monotonic per-feature scaling at fit, but fitting on raw
+    # X_c while predicting on scaled Z_te applies raw-unit split thresholds
+    # to standardised values and corrupts the trees.
+    gbm.fit(Z_c, y_c, sample_weight=w_c)
     return {
         "krr_rmse_all": float(np.sqrt(mean_squared_error(y_te, krr.predict(Z_te)))),
         "krr_rmse_burst": float(np.sqrt(mean_squared_error(y_te_b, krr.predict(Z_te_b)))),

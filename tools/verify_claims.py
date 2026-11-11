@@ -199,6 +199,23 @@ check("Gaps SKT crit", gp["medians"]["skt"]["krr_rmse_crit"]["median"], 21.698, 
 check("Gaps stratified crit", gp["medians"]["stratified"]["krr_rmse_crit"]["median"], 24.092, 0.011)
 check("Gaps sub vs strat wins", gp["tests"]["shd_vs_stratified_krr_rmse_crit"]["wins_shd"], 15, 0)
 check("Gaps sub vs strat p", gp["tests"]["shd_vs_stratified_krr_rmse_crit"]["p_value"], 6.10e-5, 1e-6)
+# Per-split inference is the independent unit (3 splits x 5 coreset seeds).
+# The pooled p above is descriptive only: the 5 seeds within a split share a
+# test set, so pooling them is pseudoreplication. Pin the per-split 5/5 wins
+# (sub4800 vs KT/SKT computed from records; summarise only stores shd_vs_*).
+for _sp in ("42", "43", "44"):
+    _recs = g["splits"][_sp]["records"]
+    for _pair in ("kt", "skt"):
+        _a = [r["shd_sub4800"]["krr_rmse_crit"] for r in _recs]
+        _b = [r[_pair]["krr_rmse_crit"] for r in _recs]
+        check(f"Gaps split {_sp} sub4800 vs {_pair} wins",
+              sum(1 for x, y in zip(_a, _b) if x < y), 5, 0)
+    check(f"Gaps split {_sp} shd vs stratified wins",
+          g["splits"][_sp]["summary"]["tests"]["shd_vs_stratified_krr_rmse_crit"]["wins_shd"], 5, 0)
+# The paper must frame these as paired RUNS (not independent splits) and name
+# the pseudoreplication; the unbacked sub4800-vs-baseline p attribution is gone.
+check_absent("paper paired-splits framing", "paired splits", PAPER)
+check_text("paper names pseudoreplication", "pseudoreplication", PAPER)
 
 # ---------------------------------------------------------------- weights
 ws = load("bench_weights_superconduct_results.json")
@@ -298,7 +315,7 @@ check("Holm SC KRR-all SKT", holm["bench_seeds"]["superconduct"]["shd_vs_skt_krr
 fr = load("bench_frontier_results.json")["results"]
 for _ds in ("superconduct", "reactor"):
     _f = fr[_ds]
-    check(f"frontier {_ds} complete", 0 if _f.get("partial") else 1, 1, 0)
+    check(f"frontier {_ds} complete", 1 if _f.get("partial") is False else 0, 1, 0)
     check(f"frontier {_ds} arm count",
           1 if all(len(_f["arms"][a]) == 20 for a in _f["arms"]) else 0, 1, 0)
 fsc = fr["superconduct"]
@@ -506,6 +523,16 @@ check("ablation br=0.50 crit", ab_b[0.5], 2.718, 0.001)
 check("ablation CI kappa=0 crit", ab_ci["phase_kappa"]["0.0"]["median"], 4.132, 0.001)
 check("ablation CI br=0.10 crit", ab_ci["high_band_ratio"]["0.1"]["median"], 4.249, 0.001)
 check("ablation CI default crit", ab_ci["phase_kappa"]["3.2"]["median"], 3.440, 0.001)
+# The 5-seed artifact now carries per-seed records: pin that every published
+# median really is the median of its records, so a doctored row with the
+# summary left intact cannot slip through.
+_ab_bad = 0
+for _rows in ab.values():
+    for _row in _rows:
+        _vals = [r["krr_rmse_crit"] for r in _row["records"]]
+        if abs(float(statistics.median(_vals)) - float(_row["krr_rmse_crit_median"])) > 1e-9:
+            _ab_bad += 1
+check("ablation medians are medians of their records", _ab_bad, 0, 0)
 for text in [
     "1.09 K (3.346 -> 4.433 K)",
     "+0.85 K (3.346 -> 4.199 K)",
@@ -549,7 +576,10 @@ check("artifact passport rank", len(art["passport_eigvals"]), 32, 0)
 check("artifact passport dtype", 1 if art["passport_eigvals"].dtype == np.float16 else 0, 1, 0)
 size_kb = os.path.getsize(ROOT / "artifacts" / "superconduct_v37.hologram.npz") / 1024
 check("artifact size KB", size_kb, 97.7, 0.2)
-check("compression ratio", 21263 / 300, 70.88, 0.02)
+# n_seen / medoids -- exactly what loader.summary()["compression_ratio"]
+# reports. The crystal distilled the 17,010-row train split, not all 21,263
+# rows, so the honest ratio is 56.7 (the README's 1.76% = 300 / 17010).
+check("compression ratio", art["n_seen"][0] / art["crystal_X"].shape[0], 56.7, 0.05)
 
 distiller_src = (ROOT / "shd" / "distiller.py").read_text(encoding="utf-8")
 version = (ROOT / "shd" / "__init__.py").read_text(encoding="utf-8")
@@ -869,6 +899,52 @@ for _arm in ("shd_plain", "shd_guarded", "kmeans"):
     check(f"guard {_arm} KRR all is the median of its records",
           abs(float(statistics.median(_vals))
               - float(g_sum[_arm]["krr_rmse_all"])), 0.0, 1e-9)
+
+# ------------------------------------------------- deltas (bench_deltas.py)
+# The GBM arm once fit on raw X_c but predicted on scaled Z_te (a unit
+# mismatch that corrupted the trees). The corrected artifact is pinned here
+# so the README table can never silently drift back to the buggy numbers.
+_dl = load("bench_deltas_results.json")
+_dls = _dl["summary"]
+_dlw = _dl["wilcoxon_deltas_on_vs_off"]
+check("deltas burst captured off", _dls["off_burst_captured_median"], 15.0, 0.0)
+check("deltas burst captured on", _dls["on_burst_captured_median"], 17.0, 0.0)
+check("deltas burst captured random", _dls["random_burst_captured_median"], 3.0, 0.0)
+check("deltas KRR burst off", _dls["off_krr_rmse_burst_median"], 4.153, 0.001)
+check("deltas KRR burst on", _dls["on_krr_rmse_burst_median"], 4.180, 0.001)
+check("deltas KRR all off", _dls["off_krr_rmse_all_median"], 0.554, 0.001)
+check("deltas KRR all on", _dls["on_krr_rmse_all_median"], 0.610, 0.001)
+check("deltas GBM burst off", _dls["off_gbm_rmse_burst_median"], 3.711, 0.001)
+check("deltas GBM burst on", _dls["on_gbm_rmse_burst_median"], 3.480, 0.001)
+check("deltas GBM all off", _dls["off_gbm_rmse_all_median"], 0.724, 0.001)
+check("deltas GBM all on", _dls["on_gbm_rmse_all_median"], 0.803, 0.001)
+check("deltas GBM burst wins", _dlw["deltas_on_vs_off_gbm_rmse_burst"]["wins"], 15, 0)
+check("deltas GBM burst p", _dlw["deltas_on_vs_off_gbm_rmse_burst"]["p_value"], 0.0441, 0.001)
+check("deltas GBM all wins", _dlw["deltas_on_vs_off_gbm_rmse_all"]["wins"], 6, 0)
+check("deltas GBM all p", _dlw["deltas_on_vs_off_gbm_rmse_all"]["p_value"], 0.0107, 0.001)
+check_digest("deltas artifact digest", artifact_digest(_dl),
+             "ef7e8252ba0578c32b07280f702474c5b8816b79c242cb143f541b9bc9231256")
+
+# ------------------------------------ metro watch + 250k stress (backed pins)
+_mw = load("bench_metro_watch_v2_results.json")
+_mw_arms = _mw["results"]["metropt3"]["arms"] if "results" in _mw else _mw["arms"]
+_mw_shd = next(a for a in _mw_arms if a["arm"] == "shd_detrend")
+check("metro shd_detrend crystal KB", _mw_shd["crystal_kb"], 55.5, 0.05)
+check("metro shd_detrend learn sec", _mw_shd["learn_sec"], 6.2, 0.05)
+check("metro shd_detrend watch scan sec", _mw_shd["watch_scan_sec"], 36.8, 0.05)
+_st = load("bench_stress250k_results.json")
+check("stress250k SHD fit s", _st["shd_fit_s"], 28.6, 0.05)
+check("stress250k SHD finalize s", _st["shd_finalize_s"], 0.08, 0.005)
+check("stress250k SHD peak MB", _st["shd_peak_mb"], 71.7, 0.05)
+check("stress250k SHD artifact KB", _st["shd_artifact_kb"], 225.2, 0.05)
+check("stress250k SHD rel error", _st["shd_rel_error"], 0.3468, 0.0005)
+check("stress250k SHD panel radar ms", _st["shd_panel_radar_ms"], 117.71, 0.05)
+# Figures removed from the README because their probe scripts / artifacts were
+# never committed (Scania validation-AUC probe; 250k MiniBatchKMeans comparison).
+# Forbid them so the unbacked numbers cannot silently return.
+for _needle in ("aucV 0.831", "aucV 0.974", "aucV 0.799",
+                "MiniBatchKMeans 5.14", "MBK predict 0.74"):
+    check_absent("readme unbacked " + _needle, _needle, README)
 
 check_digest("portfolio SC artifact digest", artifact_digest(pf_sc), "beb4cb166c8262c5fc6fbce125cb3fc21400e26d84bfed1e9e6d6daef94bbf0d")
 check_digest("portfolio PM2.5 artifact digest", artifact_digest(pf_pm), "5bd9ae9e63e1752dc679e3bef9122263fd15d9d6dbfe4464e53ce80426782188")

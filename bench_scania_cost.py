@@ -58,6 +58,9 @@ URL = ("https://archive.ics.uci.edu/static/public/421/"
        "aps+failure+at+scania+trucks.zip")
 FN_COST, FP_COST = 10, 1
 LOGIT_C_GRID = (0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0)
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_DATASETS = os.environ.get(
+    "SHD_DATASETS", os.path.normpath(os.path.join(_HERE, "..", "..", "_datasets")))
 
 
 def _read_member(zf, suffix):
@@ -67,7 +70,7 @@ def _read_member(zf, suffix):
     return "\n".join(lines)
 
 
-def load_scania(cache=r"C:\Users\User\Downloads\New folder\_datasets\scania_aps.zip"):
+def load_scania(cache=os.path.join(_DATASETS, "scania_aps.zip")):
     if not os.path.exists(cache):
         os.makedirs(os.path.dirname(cache), exist_ok=True)
         with urllib.request.urlopen(URL) as r, open(cache, "wb") as f:

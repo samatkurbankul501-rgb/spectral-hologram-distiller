@@ -17,6 +17,17 @@ try:
 except ImportError:  # dependency-free mode: run via tests/run_smoke.py
     pytest = None
 
+
+class SmokeSkip(Exception):
+    """Signals a skip in dependency-free mode so run_smoke.py counts it apart
+    from PASS/FAIL; under pytest, _skip uses pytest.skip instead."""
+
+
+def _skip(msg):
+    if pytest is not None:
+        pytest.skip(msg)
+    raise SmokeSkip(msg)
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shd import DomainBank, HologramCrystalLoader, SpectralHologramDistiller, __version__  # noqa: E402
@@ -150,10 +161,7 @@ def test_legacy_artifact_without_projector():
         "superconduct_v37.hologram.npz",
     )
     if not os.path.exists(art):
-        if pytest is not None:
-            pytest.skip("artifact not present")
-        print("SKIP  test_legacy_artifact_without_projector (artifact not present)")
-        return
+        _skip("artifact not present")
     if pytest is not None:
         with pytest.warns(UserWarning, match="pre-3.13.1"):
             loader = HologramCrystalLoader(art)

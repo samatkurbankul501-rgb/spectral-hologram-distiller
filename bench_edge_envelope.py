@@ -79,7 +79,10 @@ def rss_mb():
     except Exception:
         try:
             import resource
-            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+            import sys
+            rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            # Linux reports ru_maxrss in KB, macOS in bytes.
+            return rss / 1048576.0 if sys.platform == "darwin" else rss / 1024.0
         except Exception:
             return float("nan")
 

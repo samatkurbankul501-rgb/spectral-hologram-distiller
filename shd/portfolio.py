@@ -553,8 +553,15 @@ class ConformalCrystal:
                 up_g = self.group_up_resid_[bool(g)]
                 n_g = self.group_counts_[bool(g)]
                 if up_g is None or n_g < self.min_group:
-                    low[sel] = pred[sel] - q
-                    high[sel] = pred[sel] + q
+                    # Pooled fallback. q is the pooled residual quantile, which
+                    # is k-NN-normalised when adaptive=True, so denormalise it
+                    # back to raw target units per query row (the non-fallback
+                    # alarm-zone path uses raw signed residuals directly).
+                    half_raw = (
+                        q * np.maximum(knn_q[sel], 1e-12) if self.adaptive else q
+                    )
+                    low[sel] = pred[sel] - half_raw
+                    high[sel] = pred[sel] + half_raw
                     continue
                 # Two-sided quantiles of the SIGNED residual (y - pred) inside
                 # the group: alpha/2 per side -> exact >= 1-alpha coverage for

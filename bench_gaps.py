@@ -87,6 +87,18 @@ def holm(pvals):
 
 
 def summarise(records, split_seed=None):
+    """Median/IQR + paired Wilcoxon tests over ``records``.
+
+    Independence caveat: a Wilcoxon signed-rank test assumes independent
+    pairs. When ``records`` pools several train/test splits (the pooled
+    summary), the coreset seeds WITHIN a split share the same test set, so
+    those pairs are correlated and the pooled p-value is anti-conservative
+    (pseudoreplication). The per-split summaries are the independent-unit
+    inference; with 5 seeds the signed-rank p floor is 2/2**5 = 0.0625, so a
+    single split cannot reach p < 0.05. Only ``shd_vs_<pair>`` tests are
+    computed here (SHD_sub4800 is compared against full SHD, not against the
+    baselines).
+    """
     arms = [k for k in records[0] if k not in ("seed", "split_seed")]
     out = {"n_records": len(records), "arms": arms, "medians": {}}
     for arm in arms:
@@ -218,8 +230,7 @@ def main():
     print(f"\nSaved -> {args.output} ({res['elapsed_sec']:.0f}s)")
     ps = res["pooled_summary"]["tests"]
     for key in ("shd_vs_kt_krr_rmse_crit", "shd_vs_skt_krr_rmse_crit",
-                "shd_vs_stratified_krr_rmse_crit", "shd_vs_stratified_ht_krr_rmse_crit",
-                "shd_sub4800_vs_kt_krr_rmse_crit"):
+                "shd_vs_stratified_krr_rmse_crit", "shd_vs_stratified_ht_krr_rmse_crit"):
         if key in ps:
             print(f"  {key}: p={ps[key]['p_value']:.3g} p_holm={ps[key]['p_holm']:.3g} "
                   f"wins={ps[key]['wins_shd']}/{res['pooled_summary']['n_records']}")

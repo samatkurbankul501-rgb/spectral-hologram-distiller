@@ -1,9 +1,10 @@
 """Dump key metrics from the four bench JSON artifacts (v3.13.0 report inputs)."""
 import json
+import os
 
 import numpy as np
 
-ROOT = r"C:\Users\User\Downloads\New folder\_release\spectral-hologram-distiller"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def med_iqr(vals):

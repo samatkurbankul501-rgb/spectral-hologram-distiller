@@ -49,7 +49,9 @@ def run(seeds, m=300, batch=2500):
     n = len(X_raw); split = int(n*0.8)
     X_tr, y_tr = X_raw[:split], y_raw[:split]
     X_te, y_te = X_raw[split:], y_raw[split:]
-    crit = float(np.percentile(y_raw, 97.0))
+    # Critical threshold from the TRAIN split only: the full series (y_raw)
+    # would leak the test distribution into the regime definition.
+    crit = float(np.percentile(y_tr, 97.0))
     is_crit = y_te >= crit
     X_te_crit, y_te_crit = X_te[is_crit], y_te[is_crit]
     scaler = StandardScaler().fit(X_tr)

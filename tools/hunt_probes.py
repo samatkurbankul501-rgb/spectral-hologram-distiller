@@ -159,5 +159,10 @@ if __name__ == "__main__":
     probe_p6()
     print("\n" + "=" * 78)
     print("PROBE SUMMARY")
+    failed = 0
     for k, v in report:
         print(f"  {k}: {v}")
+        if not v:
+            failed += 1
+    print(f"\n{len(report) - failed}/{len(report)} probes behaved as expected")
+    sys.exit(1 if failed else 0)

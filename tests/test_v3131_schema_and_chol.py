@@ -160,18 +160,22 @@ def test_cholesky_cache_matches_a_fresh_factorisation():
     assert np.allclose(d._chol_cache[1][0], fresh[0])
 
 
-def test_cholesky_cache_is_invalidated_by_external_psi_sum_write():
+def test_invalidate_chol_clears_cache_and_forces_clean_rebuild():
+    from scipy import linalg
+
     rng = np.random.default_rng(0)
     X = rng.normal(size=(1500, 4))
     y = X.sum(axis=1) + 0.1 * rng.normal(size=1500)
     d = SpectralHologramDistiller(crystal_size=60, random_state=1)
     d.partial_fit(X, y)
-    d._chol_cache[1][0][0, 0] += 1.0  # corrupt the cached factor in place
+    assert d._chol_cache is not None
     d._invalidate_chol()
     assert d._chol_cache is None
     Psi_hat = d.Psi_sum / d.n_seen
-    d._chol_psi(Psi_hat)  # rebuilds a clean factor instead of reusing the corrupt one
+    d._chol_psi(Psi_hat)  # rebuilds from scratch, not a stale cached factor
     assert d._chol_cache is not None
+    fresh = linalg.cho_factor(Psi_hat + d.beta_low * np.eye(d.k), lower=True)
+    assert np.allclose(d._chol_cache[1][0], fresh[0])
 
 
 def test_package_version_matches_SHD_VERSION():

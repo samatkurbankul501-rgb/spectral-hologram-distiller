@@ -338,3 +338,38 @@ def test_integration_portfolio_then_conformal_intervals():
     assert np.allclose(iv["pred"], pred)
     cov = float(np.mean((yq >= iv["low"]) & (yq <= iv["high"])))
     assert cov >= 0.85, f"portfolio-conformal coverage {cov:.3f}"
+
+
+def test_conformal_adaptive_alarm_zone_fallback_uses_raw_units():
+    """adaptive=True + alarm_zone + a too-small group: the pooled fallback
+    quantile is k-NN-normalised, so it must be denormalised back to raw target
+    units (pred +/- q*knn), not used as a raw half-width directly."""
+    from scipy.spatial.distance import cdist
+
+    X, y = make_stream(n=4000, seed=23)
+    Xc, yc, wc, Xg, yg, wg, scaler, gamma = make_arms(
+        X, y, seed=21, n_coreset=120, threshold=6.0)
+    krr = _fit_krr(Xg, yg, wg, scaler, gamma)
+    rng = np.random.default_rng(5)
+    idx = rng.choice(len(X), size=20, replace=False)  # n_cal < min_group -> both fall back
+    cc = ConformalCrystal(k=8, adaptive=True, mondrian="alarm_zone",
+                          critical_threshold=6.0, min_group=25,
+                          zone_fraction=0.10).fit(
+        X[idx], y[idx], scaler=scaler, model=krr, model_independent=True)
+    Xq = X[:200]
+    iv = cc.predict_interval(Xq, krr, alpha=0.10)
+    assert iv["info"]["group_fallback"] is True
+
+    n = len(cc.resid_sorted_)
+    rank = int(min(n, max(1, int(np.ceil((n + 1) * 0.9))))) - 1
+    q = float(cc.resid_sorted_[rank])
+    Zq = scaler.transform(Xq)
+    d = cdist(Zq, cc._Z_train_)
+    k = min(cc.k, cc.knn_d_train_.shape[0])
+    knn_q = np.partition(d, k - 1, axis=1)[:, :k].mean(axis=1)
+    expected_half = q * np.maximum(knn_q, 1e-12)
+    assert np.allclose(iv["half_width"], expected_half)
+    assert np.allclose(iv["high"] - iv["pred"], expected_half)
+    assert np.allclose(iv["pred"] - iv["low"], expected_half)
+    # The normalised q alone is the wrong (raw-unit) half-width the bug used.
+    assert not np.allclose(iv["half_width"], q)

@@ -95,8 +95,10 @@ def test_threshold_source_describes_the_applied_threshold(tmp_path):
     assert on["threshold_source"] == "calibrated"
 
     off = ld.check_domain_shift(win, adaptive_threshold=False)
-    # adaptive OFF applies the default constant, so the source must say so
-    assert off["threshold"] == pytest.approx(BW_ALERT_THRESHOLD)
+    # adaptive OFF applies the rank-scaled default constant (the BW distance
+    # grows ~sqrt(rank) regardless of threshold mode), so the source says so.
+    rank_scale = float(np.sqrt(len(ld.eigvals) / 32.0))
+    assert off["threshold"] == pytest.approx(BW_ALERT_THRESHOLD * rank_scale)
     assert off["threshold_source"] == "default"
 
     # Symmetric contract for the combined (BW + mean-shift) path.
@@ -104,7 +106,7 @@ def test_threshold_source_describes_the_applied_threshold(tmp_path):
     on_ms = ld.check_domain_shift(win, mean_shift=True)
     assert on_ms["combined_threshold_source"] == "calibrated"
     off_ms = ld.check_domain_shift(win, mean_shift=True, adaptive_threshold=False)
-    assert off_ms["combined_threshold"] == pytest.approx(BW_ALERT_THRESHOLD)
+    assert off_ms["combined_threshold"] == pytest.approx(BW_ALERT_THRESHOLD * rank_scale)
     assert off_ms["combined_threshold_source"] == "default"
 
 

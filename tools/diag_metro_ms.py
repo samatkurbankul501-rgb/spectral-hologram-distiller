@@ -5,17 +5,20 @@ feature dominates, and the X_std values stored in the crystal.
 """
 from __future__ import annotations
 
+import os
 import sys
 
 import numpy as np
 
-ROOT = r"C:\Users\User\Downloads\New folder\_release\spectral-hologram-distiller"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from shd import HologramCrystalLoader
 from shd_watch import load_minute_table, slice_range
 
-NPZ = r"C:\Users\User\Downloads\New folder\_datasets\metro_minute_cache.npz"
+_DATASETS = os.environ.get(
+    "SHD_DATASETS", os.path.normpath(os.path.join(ROOT, "..", "..", "_datasets")))
+NPZ = os.path.join(_DATASETS, "metro_minute_cache.npz")
 LEARN = ("2020-02-01", "2020-03-15")
 CALIB = ("2020-03-15", "2020-04-10")
 

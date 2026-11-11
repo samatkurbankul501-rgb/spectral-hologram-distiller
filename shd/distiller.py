@@ -1419,7 +1419,10 @@ class SpectralHologramDistiller:
                 return self
 
         # Online update of the phase-manifold lattice.
-        self._rows_since_rebuild += B
+        # Count the rows actually absorbed online: when the warm-up buffer
+        # filled mid-batch, X_batch was sliced to its tail above, so the
+        # original B overcounts by the buffered head and rebuilds too early.
+        self._rows_since_rebuild += len(X_batch)
         if (
             self.lattice_rebuild_interval > 0
             and self._rows_since_rebuild >= self.lattice_rebuild_interval
@@ -1601,10 +1604,12 @@ class SpectralHologramDistiller:
         it a 1-feature window fed to a 2-feature non-delta crystal would be
         silently reinterpreted as a delta stream.
 
-        ``rank_passport`` must be in ``[1, sketch_dim]``. The OOD radar's alert
-        threshold is calibrated for the shipped rank of 32, so a different rank
-        changes the meaning of ``bw_distance``; the loader records the rank it
-        was given so the caller can tell the two apart.
+        ``rank_passport`` is clamped to ``[1, sketch_dim]``: a rank below 1
+        raises, while a rank above the sketch dimension keeps every available
+        eigenpair (the effective rank is recorded in the artifact). The OOD
+        radar's alert threshold is calibrated for the shipped rank of 32, so a
+        different rank changes the meaning of ``bw_distance``; the loader
+        records the rank it was given so the caller can tell the two apart.
         """
         k = int(self.k)
         rank = int(rank_passport)
@@ -1919,6 +1924,12 @@ class HologramCrystalLoader:
                 "artifact stores negative gamma_weights (they feed a weighted "
                 "ridge head); the artifact is inconsistent"
             )
+        if not np.any(self.weights > 0):
+            raise ValueError(
+                "artifact stores all-zero gamma_weights (get_training_data and "
+                "get_phase_peak_slice normalize them by their mean, which would "
+                "divide by zero); the artifact is inconsistent"
+            )
         if (self.eigvals.ndim != 1 or self.eigvecs.ndim != 2
                 or self.eigvecs.shape[0] < 1
                 or self.eigvecs.shape[1] != self.eigvals.shape[0]):
@@ -2184,38 +2195,39 @@ class HologramCrystalLoader:
         fewer rows than asked). Only if fewer labelled rows exist than the
         budget can the slice come back short.
         """
-        w_all = self._select_weights(weighting)
-        X, y, w = self.X, self.y, w_all
-        if drop_unlabelled and not np.all(self.y_labelled):
-            keep = self.y_labelled
-            X, y, w = X[keep], y[keep], w[keep]
-        if budget_points is not None:
-            if int(budget_points) < 1:
-                raise ValueError(f"budget_points must be >= 1, got {budget_points}")
-            if budget_points < len(X):
-                # v3.11.1: the phase-peak band is admitted FIRST, then the
-                # largest background cells. Crystal rows are stored sorted by
-                # cell count, so a plain head slice spent the whole budget on
-                # background and starved the rare regime the crystal exists to
-                # preserve (measured on a 200-medoid crystal with a 60-row
-                # peak band: a budget of 100 kept only 4 peak rows).
-                # v3.12.1: run this on the LABELLED row space so the budget
-                # is spent where it helps (probe B).
-                peak = self._peak_rank_idx(len(X), float(self.high_band_ratio), y=y)
-                chosen = [int(i) for i in peak[:budget_points]]
-                if len(chosen) < budget_points:
-                    taken = set(chosen)
-                    for i in range(len(X)):
-                        if i not in taken:
-                            chosen.append(i)
-                            if len(chosen) == budget_points:
-                                break
-                idx = np.asarray(chosen, dtype=np.int64)
-                X, y, w = X[idx], y[idx], w[idx]
-        if len(X) != len(self.X):
-            w = w.copy()
-            w /= np.mean(w)
-        return X, y, w
+        with self._lock:
+            w_all = self._select_weights(weighting)
+            X, y, w = self.X, self.y, w_all
+            if drop_unlabelled and not np.all(self.y_labelled):
+                keep = self.y_labelled
+                X, y, w = X[keep], y[keep], w[keep]
+            if budget_points is not None:
+                if int(budget_points) < 1:
+                    raise ValueError(f"budget_points must be >= 1, got {budget_points}")
+                if budget_points < len(X):
+                    # v3.11.1: the phase-peak band is admitted FIRST, then the
+                    # largest background cells. Crystal rows are stored sorted by
+                    # cell count, so a plain head slice spent the whole budget on
+                    # background and starved the rare regime the crystal exists to
+                    # preserve (measured on a 200-medoid crystal with a 60-row
+                    # peak band: a budget of 100 kept only 4 peak rows).
+                    # v3.12.1: run this on the LABELLED row space so the budget
+                    # is spent where it helps (probe B).
+                    peak = self._peak_rank_idx(len(X), float(self.high_band_ratio), y=y)
+                    chosen = [int(i) for i in peak[:budget_points]]
+                    if len(chosen) < budget_points:
+                        taken = set(chosen)
+                        for i in range(len(X)):
+                            if i not in taken:
+                                chosen.append(i)
+                                if len(chosen) == budget_points:
+                                    break
+                    idx = np.asarray(chosen, dtype=np.int64)
+                    X, y, w = X[idx], y[idx], w[idx]
+            if len(X) != len(self.X):
+                w = w.copy()
+                w /= np.mean(w)
+            return X, y, w
 
     def get_phase_peak_slice(
         self,
@@ -2249,21 +2261,22 @@ class HologramCrystalLoader:
         # The old hard-coded 0.26 silently disagreed with the ratio the
         # crystal was built with (and with the ratio heal protects), so a
         # critical-first crystal (br=0.65) returned a band 2.5x too narrow.
-        if high_band_ratio is None:
-            high_band_ratio = float(self.high_band_ratio)
-        if y_threshold is not None:
-            mask = self.y >= float(y_threshold)
-            if not np.any(mask):
-                idx = self._peak_rank_idx(len(self.y), high_band_ratio)
+        with self._lock:
+            if high_band_ratio is None:
+                high_band_ratio = float(self.high_band_ratio)
+            if y_threshold is not None:
+                mask = self.y >= float(y_threshold)
+                if not np.any(mask):
+                    idx = self._peak_rank_idx(len(self.y), high_band_ratio)
+                else:
+                    idx = np.where(mask)[0]
             else:
-                idx = np.where(mask)[0]
-        else:
-            idx = self._peak_rank_idx(len(self.y), high_band_ratio)
-        X_p = self.X[idx].copy()
-        y_p = self.y[idx].copy()
-        w_p = self._select_weights(weighting)[idx].copy()
-        w_p /= np.mean(w_p)
-        return X_p, y_p, w_p
+                idx = self._peak_rank_idx(len(self.y), high_band_ratio)
+            X_p = self.X[idx].copy()
+            y_p = self.y[idx].copy()
+            w_p = self._select_weights(weighting)[idx].copy()
+            w_p /= np.mean(w_p)
+            return X_p, y_p, w_p
 
     def _peak_rank_idx(self, n_medoids: int, high_band_ratio: float, y=None) -> np.ndarray:
         """Indices of the phase-peak band, in the band's rank order.
@@ -2386,7 +2399,11 @@ class HologramCrystalLoader:
 
     def _calibrated_threshold(self, n_batch: int, adaptive_threshold: bool = True) -> float:
         if not adaptive_threshold:
-            return float(BW_ALERT_THRESHOLD)
+            # The default constant still lives on this passport's rank: the BW
+            # distance grows ~sqrt(rank) regardless of threshold mode, so a
+            # rank-32 crystal is bit-identical and higher ranks keep headroom.
+            rank_scale = float(np.sqrt(len(self.eigvals) / 32.0))
+            return float(BW_ALERT_THRESHOLD * rank_scale)
         if self.tau_calibrated is not None:
             # v3.12.0: per-deployment quantile calibration (calibrate_threshold).
             # tau was measured at tau_window rows; smaller windows widen by the
@@ -2422,7 +2439,8 @@ class HologramCrystalLoader:
         fields when present, else the same default logic.
         """
         if not adaptive_threshold:
-            return float(BW_ALERT_THRESHOLD)
+            rank_scale = float(np.sqrt(len(self.eigvals) / 32.0))
+            return float(BW_ALERT_THRESHOLD * rank_scale)
         if self.ms_tau_calibrated is not None:
             b_eff = max(int(n_batch), 16)
             w_ref = max(int(self.ms_tau_window), 16)
@@ -2446,7 +2464,8 @@ class HologramCrystalLoader:
         combined path.
         """
         if not adaptive_threshold:
-            return float(BW_ALERT_THRESHOLD)
+            rank_scale = float(np.sqrt(len(self.eigvals) / 32.0))
+            return float(BW_ALERT_THRESHOLD * rank_scale)
         if self.panel_tau_calibrated is not None:
             b_eff = max(int(n_batch), 16)
             w_ref = max(int(self.panel_tau_window), 16)
@@ -2614,10 +2633,12 @@ class HologramCrystalLoader:
         ``panel_is_shifted`` = panel > panel_threshold). Both fields are
         present so callers can read the verdict of either path.
         """
-        # Return without lock: existing tests call internals directly
-        # (get_training_data etc. entry points are locked below). The
-        # snapshot+RLock contract lives on check_domain_shift/heal/save;
-        # private helpers stay unlocked so locked callers do not deadlock.
+        # Private helpers (_bw_distance, _calibrated_threshold, ...) stay
+        # unlocked: the snapshot+RLock contract lives on the public entry
+        # points (check_domain_shift/heal/save/get_training_data/
+        # get_phase_peak_slice), which wrap the whole read or mutation so a
+        # concurrent heal cannot rebind X/y/weights mid-read. RLock re-entry
+        # keeps locked callers from deadlocking on the helpers below.
         # v3.14.4: e-process. When ``e_process=True`` the panel verdict is
         # the anytime-valid e-value average (E_t / t > 1/alpha) rather than
         # the fixed quantile; the state lives on the loader so a deployment
@@ -3331,6 +3352,8 @@ class HologramCrystalLoader:
             X_win = X_win.reshape(1, -1)
         if X_win.ndim != 2:
             raise ValueError(f"stream window must be 2-D, got shape {X_win.shape}")
+        if int(n_inject) < 1:
+            raise ValueError(f"n_inject must be >= 1, got {n_inject}")
         # Stateless pre-check on purpose: forwarding streaming=True here would
         # advance _prev_row, and _prepare_stream below would then compute the
         # first-difference dX[0] against the window's own last row.

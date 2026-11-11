@@ -68,9 +68,11 @@ from shd_watch import (DAY, PROTOCOL_VERSION, MAX_ALERT_FRACTION,
                        calibrate_tau, detrended_scores, episodes,
                        load_minute_table, slice_range, window_scores, window_bounds)
 
-NPZ = r"C:\Users\User\Downloads\New folder\_datasets\metro_minute_cache.npz"
-INCIDENTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "metro_incidents.json")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_DATASETS = os.environ.get(
+    "SHD_DATASETS", os.path.normpath(os.path.join(_HERE, "..", "..", "_datasets")))
+NPZ = os.path.join(_DATASETS, "metro_minute_cache.npz")
+INCIDENTS_PATH = os.path.join(_HERE, "metro_incidents.json")
 
 LEARN = ("2020-02-01", "2020-03-15")
 CALIB = ("2020-03-15", "2020-04-10")
