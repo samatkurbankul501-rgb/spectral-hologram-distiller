@@ -53,7 +53,51 @@ BW_ALERT_THRESHOLD = 0.085
 #: Package version, single source of truth (re-exported as ``shd.__version__``).
 #: Recorded into every .hologram.npz at save time so a crystal can always tell
 #: which build distilled it.
-SHD_VERSION = "3.15.0"
+SHD_VERSION = "3.15.2"
+
+
+def _calibration_fields(prefix, calibrated, window, n_windows, fa_rate):
+    """Return the artifact fields for one radar calibration group.
+
+    A group is written only when it is COMPLETE. A half-populated group
+    (calibrated set but window / n_windows / fa_rate None) used to crash
+    ``save()`` with ``int(None)`` -- and save() is the persist path, so that
+    crash loses the result of a heal. An incomplete group is dropped
+    instead: the radar falls back to its default threshold.
+    """
+    if calibrated is None:
+        return {}
+    if window is None or n_windows is None or fa_rate is None:
+        import warnings
+        warnings.warn(
+            "dropping the incomplete " + prefix + " calibration from the "
+            "artifact: the radar falls back to its default threshold",
+            UserWarning, stacklevel=2,
+        )
+        return {}
+    return {
+        prefix + "_calibrated": np.array([float(calibrated)], dtype=np.float64),
+        prefix + "_window": np.array([int(window)], dtype=np.int64),
+        prefix + "_n_windows": np.array([int(n_windows)], dtype=np.int64),
+        prefix + "_fa_rate": np.array([float(fa_rate)], dtype=np.float64),
+    }
+
+
+def npz_output_path(path: str) -> str:
+    """Return the path numpy will actually write for a crystal artifact.
+
+    ``np.savez_compressed`` appends ``.npz`` when the name lacks it, so
+    ``save_hologram("out.hologram")`` writes ``out.hologram.npz`` while the
+    follow-up ``getsize`` looks for ``out.hologram`` and raises
+    FileNotFoundError -- with a stray file left on disk. v3.15.1 gave the
+    library the same normalisation the CLI already had.
+    """
+    p = str(path)
+    if not p.lower().endswith(".npz"):
+        p = p + ".npz"
+    return p
+
+
 
 
 class SpectralHologramDistiller:
@@ -139,19 +183,27 @@ class SpectralHologramDistiller:
         How often (in absorbed rows) the Voronoi lattice is REBUILT from the
         retained reservoir instead of only being nudged online.
 
-        Before v3.12 the lattice was built once, from the warm-up window
-        (``max(4500, 12 * crystal_size)`` rows), and never rebuilt. A rare
-        regime that appeared later in the stream therefore reached the crystal
-        with zero dedicated cells: measured on a 60k-row synthetic stream, a
-        regime starting at 10% of the stream contributed 0 of ~15 expected
-        medoids, while the same regime at 0-5% contributed 83-106.
+        ``0`` (the published default) NEVER rebuilds. The lattice is built
+        once from the warm-up window (``min(max_init_buffer, max(4500,
+        12 * crystal_size))`` rows) and afterwards only nudged online; the
+        rebuild reservoir is not collected at all. A rare regime that
+        appears LATER in the stream therefore reaches the crystal with
+        almost no dedicated cells: measured on a 60k-row synthetic stream
+        whose last 10% is a shifted regime, the default kept 1 of 300
+        critical medoids for that regime. The default is kept bit-for-bit
+        because every published artifact was distilled with it; an earlier
+        docstring wrongly promised a one-shot post-warm-up rebuild at 0 --
+        the code has gated both the reservoir and the rebuild on ``> 0``
+        since the mechanism was introduced (v3.12.0).
 
-        With the default ``lattice_rebuild_interval=0`` the lattice is rebuilt
-        once the stream has grown past the warm-up window, so the crystal
-        covers the whole stream instead of its first few thousand rows. The
-        rebuild is O(reservoir * M) in time and is amortised over the stream;
-        the retained reservoir stays bounded by ``max_init_buffer`` rows, so
-        memory remains O(k^2 + d + reservoir).
+        ``> 0`` rebuilds the lattice every ``interval`` absorbed rows from a
+        bounded reservoir (evicting background stratum + never-evicting peak
+        stratum), so late-arriving regimes get their own cells: the same
+        60k-row probe kept 126 of 300 critical medoids at interval=3000.
+        Use it for long streams with drift or late regimes (the regression
+        suite uses 1500). Each rebuild is O(reservoir * M) and is amortised
+        over the stream; the reservoir stays bounded by ``max_init_buffer``
+        rows, so memory remains O(k^2 + d + reservoir).
     peak_z_threshold : float
         |y| in standard deviations above which a streamed row is retained in
         the reservoir's *peak* stratum (which never evicts) instead of the
@@ -347,6 +399,35 @@ class SpectralHologramDistiller:
         self._reservoir_rows = 0
         self._rows_since_rebuild = 0
 
+        # v3.15.1: donor pool for the global guard. The lattice reservoir
+        # above is only filled when ``lattice_rebuild_interval > 0`` and it
+        # stores the RFF sketch (k floats/row) -- far too heavy to keep
+        # enabled by default. The guard needs a different thing anyway: a
+        # bounded, UNIFORM sample of the RAW feature rows of the WHOLE
+        # stream, from which it fits its own K-Means donors. So it gets its
+        # own reservoir:
+        #   * raw X only (no Z/U/score) -- the guard re-normalises the rows
+        #     itself through the frozen projector statistics;
+        #   * its own RNG stream (``self._donor_rng``) so consuming it does
+        #     NOT perturb ``self.rng``: every published artifact stays
+        #     bit-for-bit identical (the guard is opt-in and off by default,
+        #     so the default path draws exactly as before);
+        #   * Vitter's algorithm R, so every row of the stream has the same
+        #     chance of being a donor -- a late rare regime is represented
+        #     exactly like an early one.
+        self._donor_X = []
+        self._donor_y = []
+        # Stream index of each retained donor row: lets a caller (and
+        # the test-suite) CHECK that the pool spans the whole stream
+        # instead of trusting that it does.
+        self._donor_idx = []
+        self._donor_rows = 0
+        self._donor_seen = 0
+        self._donor_cap = int(self.max_init_buffer)
+        self._donor_rng = np.random.default_rng(
+            None if random_state is None else int(random_state) + 9973
+        )
+
         self.centers_ZY = None
         self.med_X = None
         self.med_Y = None
@@ -363,6 +444,17 @@ class SpectralHologramDistiller:
         # inside build_global_guard(); None until then.
         self._resid_mean = None
         self._resid_std = None
+
+        # v3.15.1: guard bookkeeping. ``_guard_applied`` is set only
+        # after the crystal has actually been guarded, so a second
+        # save_hologram() does not silently re-run the guard (it would
+        # replace previously-guarded rows with fresh donors).
+        self._guard_applied = False
+        self._guard_report = None
+        # v3.15.1: median-vs-mean skew of the raw targets, captured when
+        # the lattice is built (see _build_phase_manifold_lattice). None
+        # means "not measurable" -- no hint is emitted in that case.
+        self._warm_y_skew = None
 
         # v3.13.1: reuse ONE Cholesky factorisation per batch. Every batch
         # changes Psi_sum, so the factor is rebuilt lazily at most once per
@@ -475,6 +567,23 @@ class SpectralHologramDistiller:
         return ZY_cand[selected].copy()
 
     def _build_phase_manifold_lattice(self):
+        # v3.15.1 (Banner fix 4): capture the target skew HERE, while
+        # init_Y still holds the RAW warm-up targets. The lattice build
+        # empties init_Y at the end of this method, and it usually runs
+        # inside partial_fit (not finalize_crystal), so this is the only
+        # point where the raw distribution is still available.
+        self._warm_y_skew = None
+        if self.init_Y:
+            try:
+                _yv = np.concatenate([np.asarray(iy).ravel() for iy in self.init_Y])
+                if _yv.size >= 8:
+                    _sd = float(np.std(_yv))
+                    if _sd > 1e-12:
+                        _med = float(np.median(_yv))
+                        _mean = float(np.mean(_yv))
+                        self._warm_y_skew = (_med - _mean) / _sd
+            except Exception:
+                self._warm_y_skew = None
         Z_all = np.vstack(self.init_Z)
         X_all = np.vstack(self.init_X)
         Y_all = np.vstack(self.init_Y)
@@ -697,17 +806,65 @@ class SpectralHologramDistiller:
 
     # --- public API -----------------------------------------------------------
 
+    def _donor_add(self, X_B, y_B):
+        """Offer a batch to the guard's donor reservoir (algorithm R).
+
+        Uniform over the WHOLE stream: each arriving row replaces a
+        uniformly random retained slot with probability cap/seen, so every
+        row of the stream keeps the same chance of being a donor. The pool
+        stores RAW X only -- the guard re-normalises through the frozen
+        projector statistics when it fits its donors, so nothing else is
+        needed and the memory cost stays O(cap * d).
+
+        Uses ``self._donor_rng`` (a private stream) so the main ``self.rng``
+        sequence is untouched: the default path is bit-for-bit unchanged.
+        """
+        X_B = np.asarray(X_B, dtype=np.float64)
+        if X_B.ndim == 1:
+            X_B = X_B.reshape(1, -1)
+        y_B = np.asarray(y_B, dtype=np.float64).reshape(-1)
+        if len(y_B) != len(X_B):
+            return
+        cap = int(self._donor_cap)
+        if cap <= 0:
+            return
+        base = int(self._donor_seen)
+        for i in range(len(X_B)):
+            self._donor_seen += 1
+            if self._donor_rows < cap:
+                self._donor_X.append(X_B[i].copy())
+                self._donor_y.append(np.array([y_B[i]], dtype=np.float64))
+                self._donor_idx.append(base + i)
+                self._donor_rows += 1
+                continue
+            # Algorithm R: the t-th arriving row replaces a uniformly
+            # random retained slot with probability cap/t.
+            j = int(self._donor_rng.integers(0, self._donor_seen))
+            if j < cap:
+                self._donor_X[j] = X_B[i].copy()
+                self._donor_y[j] = np.array([y_B[i]], dtype=np.float64)
+                self._donor_idx[j] = base + i
+
     def _guard_pool(self):
         """Collect the representative pool for the global-donor guard.
 
-        The pool is everything the distiller still holds: the warm-up buffer
-        (rows the lattice has not consumed yet) plus both reservoir strata
-        (peak: uniform over the whole stream; background: most recent). With
-        ``lattice_rebuild_interval > 0`` the reservoir covers the whole
-        stream, so the pool is a bounded uniform-ish sample of everything seen;
-        with the default (no rebuild) it is the warm-up window plus late rows.
+        The pool is the guard's own donor reservoir: a bounded UNIFORM
+        sample of the raw feature rows of the whole stream (see
+        ``_donor_add``). It is deliberately independent of the lattice
+        reservoir, which is only filled when
+        ``lattice_rebuild_interval > 0`` and which stores the RFF sketch
+        rather than the raw rows the guard needs.
+
         Returns ``(X_pool, y_pool)`` or ``None`` when nothing is held.
         """
+        if self._donor_X:
+            return np.vstack(self._donor_X), np.vstack(self._donor_y).reshape(-1)
+        # Fallback for a distiller whose donor reservoir was never fed
+        # (the donor pool is only filled when ``global_guard=True``):
+        # the warm-up buffer plus the lattice reservoir. This is the
+        # pre-v3.15.1 pool and it is what a manual
+        # ``build_global_guard()`` call on a ``lattice_rebuild_interval>0``
+        # distiller still uses.
         parts_X = list(self.init_X) + list(self.res_bg_X) + list(self.res_peak_X)
         parts_Y = list(self.init_Y) + list(self.res_bg_Y) + list(self.res_peak_Y)
         if not parts_X:
@@ -888,6 +1045,31 @@ class SpectralHologramDistiller:
                     "pass X_pool/y_pool explicitly (e.g. the training slice)"
                 )
             X_pool, y_pool = pool
+            # v3.15.1 (Banner fix 1, REWRITTEN): the original check was
+            # unreachable -- it keyed on ``self.init_X`` being non-empty,
+            # but the lattice build clears ``init_X``, so by the time the
+            # guard runs the warm-up buffer is always gone and the branch
+            # never fired. The real defect it tried to catch is that the
+            # guard had NO donor rows at all under the shipped default
+            # (``lattice_rebuild_interval=0``), which made
+            # ``save_hologram()`` raise. That is fixed at the source: the
+            # guard now owns a donor reservoir fed on every batch (see
+            # ``_donor_add``), so the pool covers the whole stream by
+            # construction.
+            #
+            # What is still worth checking is HONESTY: the donors must
+            # represent the stream the caller thinks they do. The pool is
+            # uniform over the rows offered to it, so the only stale case
+            # left is a pool that covers fewer rows than the stream
+            # actually seen -- i.e. the guard would silently fit its
+            # donors on a prefix of the data.
+            if self._donor_X and int(self._donor_seen) < int(self.n_seen):
+                raise ValueError(
+                    "build_global_guard() would use a stale donor pool: "
+                    f"the donor reservoir saw {int(self._donor_seen)} of "
+                    f"{int(self.n_seen)} streamed rows. Pass "
+                    "X_pool/y_pool explicitly (e.g. the training slice)."
+                )
         X_pool = np.asarray(X_pool, dtype=np.float64)
         if X_pool.ndim == 1:
             X_pool = X_pool.reshape(1, -1)
@@ -930,6 +1112,11 @@ class SpectralHologramDistiller:
         X_g = X_pool[med_idx].copy()
         y_g = y_pool[med_idx].copy()
 
+        # v3.15.1 (Banner fix 2): the guard flag is set at the END of this
+        # function (after the crystal is actually mutated), so a failure
+        # halfway through cannot leave the distiller claiming a guard that
+        # was never applied. The manual and save_hologram paths share one
+        # flag: a guard applied by either path is not re-run by the other.
         # Residual-aware donor scores against the crystal's own ridge map.
         if self._resid_mean is None:
             self.fit_residual_stats(X_pool, y_pool)
@@ -949,7 +1136,7 @@ class SpectralHologramDistiller:
         # diagnostics; the swapped rows' sketches must match their new rows.
         _Zg, U_g = self._spectral_transform(X_g, update_state=False)
         self.crystal_U[order] = U_g
-        return {
+        report = {
             "swapped": int(n_sw),
             "n_pool": int(len(X_pool)),
             "weight": weight,
@@ -959,6 +1146,12 @@ class SpectralHologramDistiller:
             "min_old_weight": float(np.min(old_w)),
             "guard_weight_mean": float(np.mean(w_g)),
         }
+        # The crystal HAS been mutated by now, so the flag is honest. It is
+        # set here rather than earlier so an exception above cannot leave a
+        # half-guarded crystal claiming a completed guard.
+        self._guard_applied = True
+        self._guard_report = report
+        return report
 
     def partial_fit(self, X_batch: np.ndarray, y_batch: np.ndarray | None = None):
         """Absorb one streaming batch.
@@ -1173,6 +1366,14 @@ class SpectralHologramDistiller:
         if self.lattice_rebuild_interval > 0:
             self._reservoir_add(Z_B, X_batch, y_batch, U_B, phase_score)
 
+        # v3.15.1: feed the guard's donor reservoir. It is ALWAYS fed (not
+        # only when the lattice rebuild is on) because the guard needs a
+        # uniform sample of the whole stream regardless of how the lattice
+        # was built. It costs O(cap * d) of raw rows and touches only
+        # ``self._donor_rng``, so the published default path is unchanged.
+        if self.global_guard:
+            self._donor_add(X_batch, y_batch)
+
         if not self.lattice_ready:
             buffered = int(sum(len(a) for a in self.init_Z))
             cap = int(self.max_init_buffer)
@@ -1261,8 +1462,57 @@ class SpectralHologramDistiller:
                 "finalize_crystal() called before any data was absorbed; "
                 "call partial_fit() with at least one non-empty batch first"
             )
+        # v3.15.1 (Banner fix 4): the skew was captured when the lattice was
+        # built (init_Y is empty by now). The old placement read init_Y
+        # here, so it always saw an empty buffer and never warned.
         if not self.lattice_ready:
             self._build_phase_manifold_lattice()
+        # Read the skew AFTER the lattice build. When the lattice is built
+        # INSIDE finalize_crystal (whole stream <= max_init_buffer -- the
+        # default buffer is 8192 rows, so this is the COMMON case) the build
+        # is what measures the skew. Reading it before the build saw None,
+        # so the hint stayed silent on exactly the path that had just
+        # measured it. (v3.15.1 re-check.)
+        _y_skew = self._warm_y_skew
+        # Telemetry-aware tail-direction hint (v3.15.1 Banner fix 4).
+        #
+        # The default tail='high' silently protects the wrong side on a
+        # low-tail task (e.g. pressure/voltage sags). The skew is measured
+        # on the RAW warm-up targets, before the lattice build consumed
+        # them. med_Y is circular here: the lattice split itself partitions
+        # medoids by tail, so med_Y always "looks" opposite-skewed.
+        if (not self.unsupervised_mode and self.tail == "high"
+                and _y_skew is not None and _y_skew > 0.5):
+            import warnings as _w
+            _w.warn(
+                "finalize_crystal(): the target distribution is left-skewed "
+                f"(median {_y_skew:.2f} sd above the mean, measured on the "
+                "warm-up targets) but tail='high'. The dense mass sits on "
+                "the HIGH side, so the phase band would protect the common "
+                "case and miss the rare LOW regime. If critical = low "
+                "(e.g. pressure sags), pass tail='low'.",
+                UserWarning, stacklevel=2,
+            )
+
+        # Honest-contract hint (2026-11-11 audit): interval=0 never rebuilds
+        # the lattice, so a stream that outgrew the warm-up window is
+        # represented by its prefix only. Warn once at finalize, where the
+        # crystal is actually committed; short streams (<= warm-up) are
+        # covered whole and stay silent.
+        _warm_target = min(self.max_init_buffer, max(4500, self.M * 12))
+        if self.lattice_rebuild_interval == 0 and self.n_seen > _warm_target:
+            import warnings as _w
+            _w.warn(
+                "finalize_crystal(): lattice_rebuild_interval=0 and the "
+                f"stream ({self.n_seen} rows) outgrew the warm-up window "
+                f"({_warm_target} rows) the lattice was built from. The "
+                "lattice was never rebuilt, so regimes that appeared after "
+                "warm-up have almost no dedicated medoids. For long streams "
+                "with drift or late regimes pass lattice_rebuild_interval>0 "
+                "(e.g. 1500); 0 is kept only for bit-for-bit reproducibility "
+                "of the published artifacts.",
+                UserWarning, stacklevel=2,
+            )
 
         order = np.argsort(self.counts)[::-1]
         self.crystal_X = self.med_X[order].copy()
@@ -1315,18 +1565,21 @@ class SpectralHologramDistiller:
         exported_prob = self.gamma_weights / float(np.sum(self.gamma_weights))
         Psi_exported = (self.crystal_U.T * exported_prob) @ self.crystal_U
         rel_error = linalg.norm(Psi_exported - Psi_hat, ord="fro") / linalg.norm(Psi_hat, ord="fro")
-        if self.global_guard:
-            # Global guard (v3.14.3): mutate the just-built crystal in place
-            # before any save_hologram call. finalize_crystal() keeps side-
-            # effects confined to crystal_X/Y/U/weights so the exported
-            # crystal matches what save_hologram persists; the guard is
-            # delegated downstream (see save_hologram / manual
-            # build_global_guard call), never inlined here, to keep the
-            # relative-error definition fixed. Guard application after
-            # finalize_crystal() is the documented path; calling
-            # finalize_crystal a second time repeats the guard on an
-            # already-guarded crystal (same n_global) — acceptable dtector.
-            pass
+        # v3.15.2: finalize_crystal() REBUILDS crystal_X/Y/U and the herding
+        # weights from scratch, so a guard applied by an earlier
+        # save_hologram() is GONE -- the donor rows it swapped in were
+        # overwritten by the med_* rows. The guard flag must therefore be
+        # cleared here. Otherwise the next save_hologram() skips the guard
+        # (already applied) and silently writes a NON-guarded crystal
+        # while global_guard=True: measured, the saved crystal came out
+        # identical to a distiller built without the guard.
+        self._guard_applied = False
+        self._guard_report = None
+        # v3.15.2: the row count this crystal actually describes.
+        # save_hologram() compares it with the live n_seen and refuses to
+        # write a crystal whose passport/counts cover rows the medoids
+        # never saw.
+        self._finalized_n_seen = int(self.n_seen)
         return rel_error
 
     def save_hologram(
@@ -1371,6 +1624,24 @@ class SpectralHologramDistiller:
                 "save_hologram() called before finalize_crystal(); the crystal "
                 "has no medoids to write"
             )
+        # v3.15.2: the stream grew after finalize_crystal(). The crystal
+        # rows are the medoids picked at finalize time, while the
+        # passport (Psi_sum), the per-cell counts and n_seen cover EVERY
+        # absorbed row -- including rows no medoid ever saw. Writing that
+        # combination ships an artifact whose metadata overstates the data
+        # the crystal represents (measured: n_seen=4000 with 0 of the last
+        # 2000 rows present in the crystal). Fail loudly instead.
+        _fin_n = getattr(self, "_finalized_n_seen", None)
+        if _fin_n is not None and int(self.n_seen) != int(_fin_n):
+            raise ValueError(
+                "save_hologram(): the stream grew after finalize_crystal() "
+                f"({int(_fin_n)} -> {int(self.n_seen)} rows). The crystal you "
+                "would write still describes the first "
+                f"{int(_fin_n)} rows, while its passport and n_seen cover all "
+                f"{int(self.n_seen)} -- call finalize_crystal() again to rebuild "
+                "the crystal, or use HologramCrystalLoader.heal_domain_shift() "
+                "to absorb the new regime."
+            )
         if self.gamma_weights is None:
             raise ValueError(
                 "save_hologram() called before finalize_crystal(); the crystal "
@@ -1385,10 +1656,43 @@ class SpectralHologramDistiller:
             # build_global_guard). Not supported for include_deltas=True
             # (raises from build_global_guard), the same loud failure as
             # the manual path.
-            self.build_global_guard(
-                n_global=self.global_guard_n,
-                weight=self.global_guard_weight,
-            )
+            #
+            # v3.15.1 (Banner fix 2): a second save_hologram() must not
+            # re-run the guard. The guard swaps the lowest-weight rows, so
+            # re-running it on an already-guarded crystal would silently
+            # replace previously-guarded rows with fresh donors.
+            if not getattr(self, "_guard_applied", False):
+                # v3.15.1 (bughunt): global_guard_n is clamped against
+                # the REQUESTED crystal_size, but the stream can be
+                # shorter than the budget -- the real crystal then holds
+                # fewer rows than the guard wants to swap, and
+                # save_hologram() died with "n_global=30 exceeds crystal
+                # size 20". Clamp against the crystal that exists.
+                n_guard = int(self.global_guard_n)
+                n_actual = int(len(self.crystal_X))
+                if n_guard > n_actual:
+                    n_guard = max(0, n_actual // 2)
+                    import warnings
+                    warnings.warn(
+                        f"global_guard_n={self.global_guard_n} exceeds the "
+                        f"actual crystal size {n_actual}; clamping to "
+                        f"{n_guard} (half the crystal).",
+                        UserWarning, stacklevel=2,
+                    )
+                report = self.build_global_guard(
+                    n_global=n_guard,
+                    weight=self.global_guard_weight,
+                )
+                self._guard_applied = True
+                self._guard_report = report  # diagnostics: swapped/pool size
+            else:
+                import warnings
+                warnings.warn(
+                    "save_hologram(): global guard already applied on a "
+                    "previous save; not re-running it. Construct a new "
+                    "distiller if you need a fresh guard pass.",
+                    UserWarning, stacklevel=2,
+                )
         Psi_hat = self.Psi_sum / self.n_seen
         if self.passport_reference == "background" and self.n_bg > 0:
             # The passport describes the BACKGROUND regime. A regime that
@@ -1422,6 +1726,12 @@ class SpectralHologramDistiller:
                 [np.nan if self.critical_threshold is None else float(self.critical_threshold)],
                 dtype=np.float64,
             ),
+            # v3.15.2: the two knobs the README calls co-primary
+            # (band width and phase_kappa) travel with the artifact.
+            # Without them a crystal does not record the operating point
+            # it was distilled at.
+            tail_quantile=np.array([float(self.tail_q)], dtype=np.float64),
+            phase_kappa=np.array([float(self.kappa)], dtype=np.float64),
             y_labelled=np.ones(len(self.crystal_Y), dtype=bool),
             # v3.14.2: label-free crystals store a synthetic novelty coordinate
             # (spectral leverage) in crystal_Y, not measured targets. Optional
@@ -1432,8 +1742,9 @@ class SpectralHologramDistiller:
         if include_projector:
             payload["Omega"] = self.Omega.astype(np.float32)
             payload["phase"] = self.phase.astype(np.float32)
-        np.savez_compressed(filepath, **payload)
-        return os.path.getsize(filepath) / 1024.0
+        out_path = npz_output_path(filepath)
+        np.savez_compressed(out_path, **payload)
+        return os.path.getsize(out_path) / 1024.0
 
 
 class HologramCrystalLoader:
@@ -1708,6 +2019,20 @@ class HologramCrystalLoader:
                 self.high_band_ratio = 0.26
         else:
             self.high_band_ratio = 0.26
+
+        # v3.15.2: the operating point travels with the artifact when the
+        # file carries it. Legacy artifacts predate the field -> None
+        # (unknown), which is reported honestly in summary().
+        self.tail_quantile = None
+        if "tail_quantile" in data:
+            tq = float(np.asarray(data["tail_quantile"]).reshape(-1)[0])
+            if np.isfinite(tq):
+                self.tail_quantile = tq
+        self.phase_kappa = None
+        if "phase_kappa" in data:
+            pk = float(np.asarray(data["phase_kappa"]).reshape(-1)[0])
+            if np.isfinite(pk):
+                self.phase_kappa = pk
 
         # Which population the passport describes. Legacy artifacts predate
         # the field and were built over the whole stream.
@@ -2379,10 +2704,13 @@ class HologramCrystalLoader:
                 )
                 res["panel_distance"] = panel_distance
                 res["panel_threshold"] = float(panel_thr)
+                panel_verdict_valid = bool(
+                    adaptive_threshold and self.panel_tau_calibrated is not None
+                )
                 res["panel_threshold_source"] = (
                     "calibrated"
-                    if adaptive_threshold and self.panel_tau_calibrated is not None
-                    else "default"
+                    if panel_verdict_valid
+                    else ("uncalibrated" if adaptive_threshold else "default")
                 )
                 res["panel_mmd_distance"] = float(mmd)
                 res["panel_energy_distance"] = float(energy)
@@ -2391,22 +2719,48 @@ class HologramCrystalLoader:
                 res["panel_autocorr_lag2_distance"] = float(autocorr2)
                 res["panel_rank_dfs_distance"] = float(rank_dfs)
                 res["panel_latency_ms"] = (time.perf_counter() - t0) * 1000.0
-                res["panel_shift_evidence"] = bool(panel_distance > panel_thr)
-                res["panel_is_shifted"] = bool(panel_distance > panel_thr)
+                # v3.15.1 (bughunt): the panel score sums EIGHT non-negative
+                # terms (bw + mean-shift + mmd + energy + sliced +
+                # autocorr + autocorr2 + rank_dfs) while the default panel
+                # threshold is the BW-calibrated constant, which was fitted
+                # for the 4-term panel. Measured on in-distribution windows
+                # the 8-term score sits ~3.5-5x ABOVE the threshold, so the
+                # uncalibrated panel verdict was always "shifted" -- and it
+                # also overwrote is_shifted. Without a panel-specific
+                # calibration the panel verdict is not a verdict: report it
+                # as unknown and keep the BW verdict.
+                if not panel_verdict_valid:
+                    import warnings
+                    warnings.warn(
+                        "panel=True without a panel calibration: the panel "
+                        "score sums 8 terms while the default threshold is "
+                        "the BW-calibrated constant (fitted for 4 terms), so "
+                        "the panel verdict is unusable -- panel_is_shifted is "
+                        "reported as None and is_shifted keeps the BW verdict. "
+                        "Calibrate the panel on healthy windows "
+                        "(calibrate_threshold_panel) before using it.",
+                        UserWarning, stacklevel=2,
+                    )
+                    res["panel_shift_evidence"] = None
+                    res["panel_is_shifted"] = None
+                else:
+                    res["panel_shift_evidence"] = bool(panel_distance > panel_thr)
+                    res["panel_is_shifted"] = bool(panel_distance > panel_thr)
                 if e_process:
                     e = self._e_process_alarm(panel_distance)
                     res["e_value"] = e["e_value"]
                     res["e_t"] = e["e_t"]
                     res["e_average"] = e["e_average"]
                     res["e_threshold"] = e["e_threshold"]
-                    res["e_alarm"] = e["e_alarm"]
-                    # e-process verdict overrides panel_is_shifted
-                    res["panel_is_shifted"] = bool(res["e_alarm"])
-                    res["panel_shift_evidence"] = bool(res["e_alarm"])
-                # ``is_shifted`` follows the panel when the caller opted into it
+                    res["e_alarm"] = e["e_alarm"] if panel_verdict_valid else None
+                    if panel_verdict_valid:
+                        # e-process verdict overrides panel_is_shifted
+                        res["panel_is_shifted"] = bool(res["e_alarm"])
+                        res["panel_shift_evidence"] = bool(res["e_alarm"])
+                # `is_shifted` follows the panel when the caller opted into it
                 # without the mean_shift path; the mean_shift path keeps precedence
                 # so an explicit mean_shift=True caller keeps its existing contract.
-                if not mean_shift:
+                if not mean_shift and res["panel_is_shifted"] is not None:
                     res["is_shifted"] = bool(res["panel_is_shifted"])
             return res
 
@@ -3184,6 +3538,13 @@ class HologramCrystalLoader:
         # checks move toward the new domain. One heal does not necessarily clear
         # the alert (the SC benchmark leaves BW at ~0.465 > 0.085); repeated
         # heals or a domain bank may be needed.
+        #
+        # v3.15.1 (Banner fix 3): the RETURNED dict makes the partial nature
+        # explicit -- bw_after may still exceed the radar threshold, and
+        # bw_after-vs-threshold tells the caller whether an alarm would keep
+        # firing. `is_shifted` on the post-heal re-check is the previous
+        # behavior preserved for compatibility; the new explicit fields
+        # remove the need to infer partial healing from a silent invariant.
         Psi_new = (U_new.T @ U_new) / max(len(U_new), 1)
         if passport_recalibrate:
             alpha_blend = 1.0
@@ -3231,6 +3592,9 @@ class HologramCrystalLoader:
             "n_injected": int(n_sel),
             "n_pruned": int(n_pruned),
             "n_unlabelled_injected": int(np.sum(~np.asarray(labelled_patch, dtype=bool))),
+            "still_shifted": bool(after["is_shifted"]),
+            "threshold": float(after["threshold"]),
+            "threshold_source": after["threshold_source"],
             "warning": (
                 "label-free heal: the injected rows carry a placeholder target, "
                 "not a measured one; drop them with get_training_data("
@@ -3276,30 +3640,41 @@ class HologramCrystalLoader:
                 dtype=np.float64,
             ),
         )
+        # v3.15.2: keep the operating point when a healed crystal is
+        # re-saved (the heal does not change it).
+        if getattr(self, "tail_quantile", None) is not None:
+            payload["tail_quantile"] = np.array([float(self.tail_quantile)], dtype=np.float64)
+        if getattr(self, "phase_kappa", None) is not None:
+            payload["phase_kappa"] = np.array([float(self.phase_kappa)], dtype=np.float64)
         if getattr(self, "tau_calibrated", None) is not None:
             # v3.12.0: the per-deployment quantile calibration travels with
             # the crystal. heal_domain_shift clears it when the passport moves.
-            payload["tau_calibrated"] = np.array([float(self.tau_calibrated)], dtype=np.float64)
-            payload["tau_window"] = np.array([int(self.tau_window)], dtype=np.int64)
-            payload["tau_n_windows"] = np.array([int(self.tau_n_windows)], dtype=np.int64)
-            payload["tau_fa_rate"] = np.array([float(self.tau_fa_rate)], dtype=np.float64)
+            payload.update(_calibration_fields(
+                "tau", self.tau_calibrated, self.tau_window,
+                self.tau_n_windows, self.tau_fa_rate,
+            ))
         if getattr(self, "ms_tau_calibrated", None) is not None:
             # v3.13.0: the combined-radar fused-threshold calibration travels
             # with the crystal the same way.
-            payload["ms_tau_calibrated"] = np.array([float(self.ms_tau_calibrated)], dtype=np.float64)
-            payload["ms_tau_window"] = np.array([int(self.ms_tau_window)], dtype=np.int64)
-            payload["ms_tau_n_windows"] = np.array([int(self.ms_tau_n_windows)], dtype=np.int64)
-            payload["ms_tau_fa_rate"] = np.array([float(self.ms_tau_fa_rate)], dtype=np.float64)
+            payload.update(_calibration_fields(
+                "ms_tau", getattr(self, "ms_tau_calibrated", None),
+                getattr(self, "ms_tau_window", None),
+                getattr(self, "ms_tau_n_windows", None),
+                getattr(self, "ms_tau_fa_rate", None),
+            ))
         if getattr(self, "panel_tau_calibrated", None) is not None:
             # v3.14.3: the panel-radar fused-threshold calibration travels
             # with the crystal the same way.
-            payload["panel_tau_calibrated"] = np.array([float(self.panel_tau_calibrated)], dtype=np.float64)
-            payload["panel_tau_window"] = np.array([int(self.panel_tau_window)], dtype=np.int64)
-            payload["panel_tau_n_windows"] = np.array([int(self.panel_tau_n_windows)], dtype=np.int64)
-            payload["panel_tau_fa_rate"] = np.array([float(self.panel_tau_fa_rate)], dtype=np.float64)
+            payload.update(_calibration_fields(
+                "panel_tau", getattr(self, "panel_tau_calibrated", None),
+                getattr(self, "panel_tau_window", None),
+                getattr(self, "panel_tau_n_windows", None),
+                getattr(self, "panel_tau_fa_rate", None),
+            ))
         if self.Omega is not None and self.phase is not None:
             payload["Omega"] = self.Omega.astype(np.float32)
             payload["phase"] = self.phase.astype(np.float32)
+        out_path = npz_output_path(out_path)
         np.savez_compressed(out_path, **payload)
         return os.path.getsize(out_path) / 1024.0
 
@@ -3327,6 +3702,11 @@ class HologramCrystalLoader:
             "mean_shift_calibrated": bool(getattr(self, "ms_tau_calibrated", None) is not None),
             "panel_calibrated": bool(getattr(self, "panel_tau_calibrated", None) is not None),
             "passport_reference": self.passport_reference,
+            # v3.15.2: the operating point, when the artifact carries it.
+            "tail_quantile": (None if getattr(self, "tail_quantile", None) is None
+                              else float(self.tail_quantile)),
+            "phase_kappa": (None if getattr(self, "phase_kappa", None) is None
+                            else float(self.phase_kappa)),
             "n_unlabelled": int(np.sum(~self.y_labelled)),
             "y_min": float(np.min(self.y)),
             "y_median": float(np.median(self.y)),

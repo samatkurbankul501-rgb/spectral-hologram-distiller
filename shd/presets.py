@@ -46,13 +46,19 @@ PRESETS: dict[str, dict[str, Any]] = {
         "params": {
             "global_guard": True,
         },
-        "source": "README §10 Known limitations / bench_pm25_rehab: without "
-                  "the guard SHD loses global regression to K-Means (+6.9% "
-                  "KRR-all p=4.8e-4); the guard (default n_global=150, weight=0.35) "
-                  "swaps the 150 lowest-weight rows for K-Means global medoids "
-                  "and wins BOTH all/crit 5/5 without hurting crit. PM2.5 global "
-                  "without guard = negative result; ship the guard or call it "
-                  "rare-episode monitoring.",
+        "source": "bench_global_guard_results.json (20 seeds, shipped path: "
+                  "save_hologram() with global_guard=True). Without the guard SHD "
+                  "loses global regression on PM2.5 (KRR-all 101.15, R2 -0.15); "
+                  "the guard (n_global=150, weight=0.35) fixes the global fit: "
+                  "KRR-all 91.52 (20/20, p=1.9e-6), GBM-all 85.86 (20/20, "
+                  "p=1.9e-6), R2 +0.06. HONEST LIMITS: it only TIES K-Means on "
+                  "global KRR (91.52 vs 90.40, 8/20, p=0.14 n.s.) and LOSES on "
+                  "global GBM (85.86 vs 77.38, 3/20, p=0.024); its win is the "
+                  "CRITICAL regime (209.15 vs K-Means 239.15, 15/20, p=0.0014). "
+                  "It also COSTS rare rows (26.5 -> 11.5 captured), because the "
+                  "swapped rows are the low-weight ones. Use it when global fit "
+                  "matters and the critical regime survives; without it, treat "
+                  "PM2.5 as rare-episode monitoring only.",
     },
     "balanced": {
         "params": {"high_band_ratio": 0.50},
@@ -82,12 +88,14 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
         "explicit_defaults": True,
         "source": "Auto-engine for sparse critical regimes (crit_frac <= 5%): "
-                  "tail_quantile=97 + global_guard. bench_pm25_rehab: "
-                  "tq97+guard recovers global R2 to +0.04 KRR-all while "
-                  "keeping crit ~205 K (vs default global R2 -0.13). "
-                  "Opt-in: pass y with crit_frac<=0.05 detection, or use "
-                  "apply_preset('sparse_auto') explicitly. bit-for-bit: "
-                  "defaults untouched.",
+                  "tail_quantile=97 + global_guard. Measured on the shipped path "
+                  "(bench_global_guard_results.json, 20 seeds): global R2 goes "
+                  "from -0.15 (no guard) to +0.06 (with guard), KRR-all 91.52 vs "
+                  "101.15 (20/20, p=1.9e-6), critical RMSE 209.15 vs 212.36 "
+                  "(unchanged, 10/20, p=0.50 n.s.). COST: rare rows drop from "
+                  "26.5 to 11.5 captured, and global GBM still trails K-Means "
+                  "(85.86 vs 77.38). Opt-in: use apply_preset('sparse_auto') "
+                  "explicitly. bit-for-bit: defaults untouched.",
     },
     "critical_first_no_residual": {
         "params": {

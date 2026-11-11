@@ -1,5 +1,75 @@
-# Spectral Hologram Distiller (SHD v3.15.0)
+# Spectral Hologram Distiller (SHD v3.15.2)
 
+> **v3.15.2 (2026-11-11): the 2026-11-07 bug hunt (seven defects), the
+> 2026-11-08 follow-up hunt (seven more) and the 2026-11-11 honesty audit,
+> released together.** Every finding below was
+> re-measured in this repository first; one audit claim was REFUTED by that
+> re-measurement and is deliberately absent from this list. The published
+> default path is untouched — the committed artifacts still reproduce
+> bit-for-bit (re-checked against HEAD `97c7d16` on ten arrays, and
+> `bench_global_guard_results.json` re-run to 1e-9).
+> (1) **A second `finalize_crystal()` silently threw the global guard away.**
+> The crystal is rebuilt from the medoids, so the rows the guard had swapped
+> in were overwritten — while the "guard already applied" flag stayed set,
+> so the next save skipped the guard and wrote a NON-guarded crystal while
+> `global_guard=True`. Measured: the saved crystal came out identical to a
+> distiller built without the guard. `finalize_crystal()` now clears the flag,
+> so the next save re-guards the rebuilt crystal.
+> (2) **Rows absorbed after `finalize_crystal()` vanished silently.** The
+> medoids still described the old rows while the passport, the per-cell
+> counts and the artifact `n_seen` covered the new ones (measured:
+> `n_seen=4000` with 0 of the last 2000 rows present in the crystal).
+> `save_hologram()` now refuses with a `ValueError` naming the fix (finalize
+> again, or heal).
+> (3) **The CLI crashed on an output path without a `.npz` suffix.** numpy
+> appends `.npz`, then the CLI measured the original name: a
+> `FileNotFoundError` plus a stray file left on disk. Output paths are
+> normalised now, for `distill`, `migrate` and `heal` alike.
+> (4) **The portfolio gate trained on two opposite column conventions.** Each
+> training block put its OWN expert in slot 0, while inference always puts
+> the critical expert there — the stacker learned a convention that did not
+> exist at inference time. Measured: 55% of global-domain rows were routed
+> to the critical expert; it is 25% now, and the gate own output is about
+> 10% - the remainder is the alarm-priority floor pinning rows whose
+> critical prediction sits at or above the threshold, which is intended.
+> One convention now, and the portfolio benchmarks were re-run from scratch
+> on all three datasets.
+> (5) **The conformal intervals were calibrated in-sample.** The residuals
+> come from scoring the calibration rows with the very model that was fitted
+> on them; when that model overfits them the intervals come out too narrow
+> and the coverage guarantee does not hold (measured 0.83 at alpha=0.10
+> against a 0.90 target with a 400-row fit; with a heavily regularised model
+> the gap shrinks to 0.87 vs 0.89 - the size of the violation is
+> model-dependent, which is exactly why the guarantee has to be declared
+> rather than assumed). `ConformalCrystal.fit()` now warns and asks the
+> caller to declare `model_independent=True`.
+> (6) **`emergency_band=0.0` disabled the documented alarm-priority floor.**
+> The floor now applies at or above the threshold whatever the band is
+> (measured before the fix: min weight 0.658 where the docstring promises
+> 1.0).
+> (7) **The artifact did not record the operating point.** `tail_quantile`
+> and `phase_kappa` — the two knobs this README calls co-primary — now
+> travel with the crystal and are reported by `summary()`; legacy artifacts
+> report them as unknown rather than guessing.
+> Regressions: `tests/test_bughunt_2026_11_07.py` (7 tests, one per defect).
+> **Follow-up hunt (2026-11-08): seven more defects**, same reproduce-first
+> discipline: `save_hologram()` and loader save now normalise the `.npz`
+> suffix (the CLI crash of defect 3 had a loader twin); an uncalibrated
+> 8-term panel reported a verdict against the 4-term BW threshold — it now
+> returns `None` with a warning until calibrated; the domain bank honours
+> the loader width contract; the global guard survives streams shorter
+> than its donor budget; loader save survives half-populated calibration.
+> Regressions: `tests/test_bughunt_2026_11_08.py` (7 tests).
+> **Honesty audit (2026-11-11):** the `lattice_rebuild_interval` docstring
+> had promised a one-shot post-warm-up rebuild at the default 0 since
+> v3.12.0, while the code gates both the reservoir and the rebuild on
+> `> 0` (measured on a 60k-row probe with a late regime in the last 10%:
+> 1/300 vs 126/300 critical medoids). The default stays bit-for-bit; the
+> docstring now states the true contract and `finalize_crystal()` warns
+> when a prefix-only stream outgrew its warm-up window. The claim gate
+> also triple-counted six `check_absent` needles: deduplicated, 470 -> 458
+> checks. Regressions: `tests/test_audit_2026_11_11.py` (5 tests). The
+> claim gate stands at 458 checks, the suite at 247 tests.
 > **v3.14.1 (2026-10-24): measured Scania logit diagnosis, machine-readable
 > presets, and an honest gate-solver budget.** Three tails from the v3.14.0
 > weakness map, each closed by measurement:
@@ -47,14 +117,22 @@
 > — alarm priority over economy. Twenty-seed three-dataset benchmark
 > (`bench_portfolio.py`, Wilcoxon signed-rank, equal m=300 arms; the
 > portfolio holds 300+300 — a second expert is bought with cores, not with
-> new data): **SC** — crit **17.95** vs 18.81 SHD-C (p=4e-4), 23.26 KT,
-> 21.19 SKT, 19.57 hard-gate; global 15.41 = SHD-C 15.42 (p=0.52);
-> **PM2.5** — Pareto-best: crit **227.27** (SHD-C 231.01, KT 245.74) AND
-> global **86.67** (KT 89.89, SHD-C 95.08), both significant;
-> **reactor** — a hair worse on crit (3.45 vs 3.44, p=0.03) and equal on
-> global (0.98) while beating KT/SKT/hard-gate everywhere (p<1e-4): where
-> the critical expert alone is already enough, the portfolio stays out of
-> its way.
+> new data). **Re-measured from scratch on 2026-11-07 (20 seeds x 3 datasets)
+> after the gate column-convention fix; the pre-fix numbers are superseded.**
+> Every number below is KRR: the portfolio's GBM column duplicates the SHD arm
+> by construction (both fit the same critical coreset with the same seed), so
+> it is not an independent portfolio measurement and the Wilcoxon table is
+> KRR-only. **SC** — crit **18.32** vs 18.81 SHD-C (p=0.064, NOT significant
+> — a tie), 23.26 KT / 21.19 SKT / 19.57 hard-gate (all p<1e-4); global
+> **15.38** vs 15.42 SHD-C (p=0.030), ahead of KT / SKT / hard-gate.
+> **PM2.5** — global **87.08** vs 95.08 SHD-C (p=3.8e-6) and 89.89 KT
+> (p=1.3e-5), but SKT (86.53) is NOT beaten (p=0.596, n.s.); crit **228.31**
+> vs 231.01 SHD-C is a tie (p=0.571) while beating SKT (246.02, p=0.0014).
+> **reactor** — the portfolio is WORSE than SHD-C on both axes (crit 3.65 vs
+> 3.44, p=9.5e-6; global 0.994 vs 0.976, p=0.0037), though still ahead of
+> KT / SKT / hard-gate (p<1e-4). Net after the fix: one clear global win
+> (PM2.5 global), a tie on SC and a small loss on reactor — the portfolio is
+> NOT a Pareto-best arm.
 > The hard threshold gate (`bench_moe_kt.py` routing) LOSES to the soft OOF
 > stacker on every dataset (SC 19.57, PM2.5 238.36/90.63, reactor
 > 4.20/1.12): the gate must read both experts' predictions, not a threshold.
@@ -1006,9 +1084,10 @@ the §6 operating-point sweep. Single source of truth:
 
 | Arm (M=300) | KRR RMSE crit | GBM RMSE crit | Rare captured (of 2500) |
 | :--- | :---: | :---: | :---: |
-| SHD br=0.26 (default) | 14.94 | 16.13 | 58.0 |
-| SHD br=0.50 | 15.51 | 15.42 | 107.5 |
-| SHD br=0.65 | **14.53** | **14.01** | **138.5** |
+| SHD br=0.26 (default), gamma weights | 14.94 | 16.13 | 58.0 |
+| SHD br=0.50, gamma weights | 15.51 | 15.42 | 107.5 |
+| SHD br=0.65, gamma weights | 14.52 | 14.01 | 138.5 |
+| **SHD br=0.65, uniform weights** | **13.45** | **12.74** | **138.5** |
 | Random | 18.05 | 19.77 | 36.5 |
 | K-Means | 16.06 | 17.93 | 53.5 |
 | Kernel Thinning | 17.52 | 18.14 | 34.5 |
@@ -1025,6 +1104,17 @@ baselines on both models' critical RMSE** — KRR: vs Random 16/20
 population share, a 3.8× over-representation). The GBM crystal even beats the
 **full-pool GBM oracle** on the critical regime, 19/20 seeds (14.01 vs 17.21 K).
 
+**The uniform-weight arm is stronger still, and the table above used to hide it.**
+SHDU is the *same crystal* as `shd` — only the training weights differ (ones
+instead of the tempered Voronoi gamma weights), so it costs nothing to compute. At
+`br=0.65` it gives KRR crit **13.45 K** and GBM crit **12.74 K**: it beats every
+baseline on both models by a wider margin — KRR: vs Random 17/20
+($p=3.9\times10^{-4}$), vs K-Means 17/20 ($p=1.4\times10^{-2}$), vs KT 16/20
+($p=1.4\times10^{-3}$), vs SKT 17/20 ($p=1.7\times10^{-4}$); GBM: vs Random **20/20**
+($p=1.9\times10^{-6}$), vs K-Means 17/20 ($p=1.1\times10^{-2}$), vs KT 19/20
+($p=1.3\times10^{-5}$), vs SKT 18/20 ($p=3.6\times10^{-5}$) — and its GBM critical
+RMSE sits **4.5 K below the full-pool GBM oracle** (12.74 vs 17.21).
+
 **Honest costs and negatives, same artifact:**
 
 - The `br=0.65` global price on FD001 is real, not noise: KRR-all 21.40 K is
@@ -1033,10 +1123,23 @@ population share, a 3.8× over-representation). The GBM crystal even beats the
   capped-RUL target puts 39.9% of training rows on a single mass point
   (y = 125), so every band cell costs more background coverage than on
   SC/reactor.
-- The KRR oracle is **not** beaten on FD001 (best arm 8/20 at `br=0.65` crit,
-  0/20 global): the oracle-beating regime of §6 does not transfer
-  automatically — it is a property of a dataset's tail geometry, which is why
-  this section reports baseline wins and oracle wins separately.
+- The KRR oracle is beaten **only** by the uniform-weight arm and **only** on the
+  critical regime: `shdu` at `br=0.65` has median 13.45 K against the
+  oracle's 13.57 K (10/20 per-seed wins), while the gamma-weighted arm does not (8/20). On
+  global KRR **every** arm is 0/20 against the oracle. The oracle-beating regime
+  of §6 therefore does not transfer automatically — it is a property of a
+  dataset's tail geometry *and* of the weighting, which is why this section
+  reports baseline wins and oracle wins separately.
+- **Weighting is a deployment decision, and the shipped default is not the best
+  one on a low tail.** The loader defaults to `weighting="gamma"`; on FD001 — a
+  *low*-tail dataset, i.e. the shape of a remaining-life problem — uniform weights
+  are better on the critical regime with the **identical crystal** (13.45 K vs
+  14.52 K KRR, 12.74 K vs 14.01 K GBM), and marginally better globally too
+  (21.14 K vs 21.40 K) although both still trail Random's 19.87 K. The rule for a
+  deployment: **near-failure accuracy → uniform weights; global accuracy → gamma
+  weights.** It is one flag on `loader.get_training_data(weighting=...)`; no new
+  crystal is needed, and the weights are a per-deployment choice, not a protocol
+  constant.
 - The default `br=0.26` is the milder operating point: KRR critical beats
   Random (15/20, $p=2.0\times10^{-3}$) and KT (13/20, $p=1.9\times10^{-2}$),
   ties K-Means/SKT, keeps global KRR competitive (19.56 K; beats K-Means 19/20,
@@ -1084,6 +1187,26 @@ when global fit still matters.
   monitoring with `tail_quantile=97`, **not** as a global regressor. Source of
   truth: `bench_pm25.py` / `bench_pm25_results.json` (default configuration) and
   `bench_pm25_rehab.py` / `bench_pm25_rehab_results.json` (knob sweep).
+
+  **The shipped global guard fixes the global fit, with two honest costs.**
+  `global_guard=True` (the `pm25_global` / `sparse_auto` presets) swaps the
+  150 lowest-weight crystal rows for K-Means donors drawn from a uniform
+  sample of the whole stream. Measured on the SHIPPED path
+  (`bench_global_guard.py` / `bench_global_guard_results.json`, 20 seeds,
+  `tail_quantile=97`, M=300): global KRR-all **101.15 → 91.52** (20/20,
+  $p=1.9\times10^{-6}$), global GBM-all 93.36 → 85.86 (20/20), R² −0.15 →
+  +0.06 — the negative global result is repaired. Two limits are measured,
+  not assumed: it only **ties** K-Means on global KRR (91.52 vs 90.40, 8/20,
+  $p=0.14$, n.s.) and **loses** on global GBM (85.86 vs 77.38, 3/20,
+  $p=0.024$); its win is the **critical** regime (209.15 vs K-Means 239.15,
+  15/20, $p=0.0014$). It also **costs rare rows**: the swapped rows are the
+  low-weight ones, so rare capture falls from 26.5 to 11.5 medians. Before
+  v3.15.1 the shipped guard had no artifact at all (and with the default
+  `lattice_rebuild_interval=0` it could not even save: it had no donor rows).
+  Note that the PM2.5 "300-medoid guard" row in the paper is a DIFFERENT
+  mechanism -- a manual K-Means concatenation
+  (`bench_critical_guard300_results.json`) -- and does not describe the
+  shipped path measured here.
 
 - **Forgetting is real for a single crystal, bounded for a bank.** Repeated
   `heal_domain_shift` on one crystal degrades the original regime monotonically

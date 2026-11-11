@@ -13,10 +13,12 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import statistics
 
 ROOT = Path(__file__).resolve().parent.parent
 PAPER = (ROOT / "paper" / "main.tex").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
+INDUSTRY = (ROOT / "INDUSTRY_ITERATION.md").read_text(encoding="utf-8")
 
 failures = []
 checks = 0
@@ -48,6 +50,69 @@ def check_text(name, needle, haystack=PAPER):
     print(f"{'PASS' if ok else 'FAIL'}  {name:52s} text={needle[:60]!r}")
     if not ok:
         failures.append(name)
+
+def check_in_function(name, func_header, needle, haystack):
+    """Assert that a needle lives INSIDE a given function body.
+
+    A plain substring check is not enough: the same statement can occur
+    several times in a file (e.g. the constructor and finalize_crystal),
+    and then the check still passes after the intended site was removed --
+    a vacuous check. Extract the function body first, then look inside it.
+    """
+    global checks
+    checks += 1
+    start = haystack.find(func_header)
+    ok = False
+    if start >= 0:
+        rest = haystack[start + len(func_header):]
+        end = rest.find("\n    def ")
+        body = rest if end < 0 else rest[:end]
+        ok = needle in body
+    label = "PASS" if ok else "FAIL"
+    print(f"{label}  {name:52s} in {func_header[:26]!r} needle={needle[:38]!r}")
+    if not ok:
+        failures.append(name)
+
+def check_text_count(name, needle, expected, haystack):
+    """Assert the needle appears EXACTLY 'expected' times in the haystack.
+
+    A plain substring check is vacuous when the same number is rendered more
+    than once (two README tables quote the same Scania cost): mutating one
+    copy leaves the other, the check still passes and the regression slips
+    through. Pinning the COUNT turns a hidden copy into a visible failure.
+    """
+    global checks
+    checks += 1
+    n = haystack.count(needle)
+    ok = n == expected
+    print(f"{'PASS' if ok else 'FAIL'}  {name:52s} count={n} expected={expected} text={needle[:34]!r}")
+    if not ok:
+        failures.append(name)
+
+
+def check_digest(name, actual, expected):
+    """Assert a sha256 digest matches exactly (string equality)."""
+    global checks
+    checks += 1
+    ok = actual == expected
+    print(f"{'PASS' if ok else 'FAIL'}  {name:52s} sha256={actual[:16]}...")
+    if not ok:
+        failures.append(name)
+
+
+def artifact_digest(payload):
+    """sha256 over an artifact with the volatile timing field removed.
+
+    Value pins and median pins are both blind to a doctored per-seed row:
+    a median is robust to a single outlier, and the published summary quotes
+    only the median. The digest covers EVERY field of EVERY record, so any
+    tampering inside the artifact breaks the gate.
+    """
+    import hashlib
+    body = {k: v for k, v in payload.items() if k != "elapsed_sec"}
+    blob = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
 
 def check_absent(name, needle, haystack=PAPER):
     global checks
@@ -281,14 +346,85 @@ check("cmapss br065 gbm_crit wins vs skt",
       cm["wilcoxon"]["shd_r0.65_vs_skt_gbm_rmse_crit"]["wins_shd"], 18, 0)
 check("cmapss br065 gbm beats full-pool oracle at crit",
       cm["vs_oracle"]["shd_r0.65"]["gbm_rmse_crit"]["wins_vs_oracle"], 19, 0)
-check("cmapss br065 krr oracle NOT beaten (honest negative)",
+check("cmapss br065 gamma arm krr oracle NOT beaten (honest negative)",
       cm["vs_oracle"]["shd_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 8, 0)
+# The uniform-weight arms (SHDU) are the SAME crystals with ones instead of
+# the gamma weights. On FD001 -- a LOW-tail dataset, i.e. the shape of a
+# remaining-life problem -- they dominate the gamma arms on the critical
+# regime and beat the KRR oracle by median. The README table omitted them
+# for a whole release; these pins exist so that omission cannot come back.
+check("cmapss shdu r065 krr_crit median",
+      cm["wilcoxon"]["shdu_r0.65_vs_kt_krr_rmse_crit"]["median_shd"], 13.447, 0.0005)
+check("cmapss shdu r065 gbm_crit median",
+      cm["wilcoxon"]["shdu_r0.65_vs_kt_gbm_rmse_crit"]["median_shd"], 12.735, 0.0005)
+check("cmapss shdu r065 krr_crit wins vs random",
+      cm["wilcoxon"]["shdu_r0.65_vs_random_krr_rmse_crit"]["wins_shd"], 17, 0)
+check("cmapss shdu r065 krr_crit wins vs kmeans",
+      cm["wilcoxon"]["shdu_r0.65_vs_kmeans_krr_rmse_crit"]["wins_shd"], 17, 0)
+check("cmapss shdu r065 gbm_crit wins vs random (20/20)",
+      cm["wilcoxon"]["shdu_r0.65_vs_random_gbm_rmse_crit"]["wins_shd"], 20, 0)
+check("cmapss shdu r065 gbm_crit wins vs kt",
+      cm["wilcoxon"]["shdu_r0.65_vs_kt_gbm_rmse_crit"]["wins_shd"], 19, 0)
+check("cmapss shdu r065 krr_crit p<0.001 vs random",
+      1 if cm["wilcoxon"]["shdu_r0.65_vs_random_krr_rmse_crit"]["p_value"] < 0.001 else 0, 1, 0)
+check("cmapss shdu r065 gbm_crit p<1e-5 vs random",
+      1 if cm["wilcoxon"]["shdu_r0.65_vs_random_gbm_rmse_crit"]["p_value"] < 1e-5 else 0, 1, 0)
+check("cmapss shdu r065 krr_crit beats oracle by median",
+      1 if cm["vs_oracle"]["shdu_r0.65"]["krr_rmse_crit"]["median_shd"]
+             < cm["vs_oracle"]["shdu_r0.65"]["krr_rmse_crit"]["oracle"] else 0, 1, 0)
+check("cmapss shdu r065 krr_crit wins vs oracle",
+      cm["vs_oracle"]["shdu_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 10, 0)
+check("cmapss shdu r065 gbm_crit wins vs oracle",
+      cm["vs_oracle"]["shdu_r0.65"]["gbm_rmse_crit"]["wins_vs_oracle"], 19, 0)
+check("cmapss no arm beats the oracle on global krr",
+      1 if all(v["krr_rmse_all"]["wins_vs_oracle"] == 0
+               for v in cm["vs_oracle"].values()) else 0, 1, 0)
 check("cmapss br065 rare median",
       float(np.median([r["shd_r0.65"]["rare_captured"] for r in cm["records"]])), 138.5, 0.001)
 check("cmapss kmeans krr_crit median",
       cm["wilcoxon"]["shd_r0.65_vs_kmeans_krr_rmse_crit"]["median_kmeans"], 16.058, 0.0005)
 
 # ---------------------------------------------------------------- paper strings
+PAPER_NEEDLE_COUNTS = {
+    '0.038': 4,
+    '0.203': 2,
+    '0.458': 2,
+    '0.465': 1,
+    '0.497': 2,
+    '13.36': 2,
+    '15.42': 1,
+    '168.40': 1,
+    '18.6\\% of the dataset (3,952 / 21,263; 778 of 4,253 test rows)': 1,
+    '18.81': 3,
+    '196.02': 1,
+    '2.21--62.35': 2,
+    '20.62': 2,
+    '21.20': 3,
+    '22.43': 2,
+    '22.93': 2,
+    '220': 1,
+    '23.26': 3,
+    '245': 5,
+    '41,757': 1,
+    '50.2': 2,
+    '55.0': 1,
+    '59.0': 1,
+    '64.5': 1,
+    '7.32': 2,
+    '78.92': 1,
+    '85.32': 1,
+    'DomainBank': 2,
+    'Holm $p=0.051$': 1,
+    'Oracle (KRR 9,000; GBM 16,000)': 1,
+    'Oracle (KRR 9,000; GBM full train)': 1,
+    'SHD wins (KRR Crit)': 2,
+    'passport\\_recalibrate': 2,
+    'sec:passport': 4,
+    'sec:pm25': 3,
+    'tab:passport': 2,
+    'tab:pm25': 2,
+}
+
 for text in [
     r"18.6\% of the dataset (3,952 / 21,263; 778 of 4,253 test rows)",
     r"Oracle (KRR 9,000; GBM full train)",
@@ -304,31 +440,55 @@ for text in [
     r"DomainBank", r"passport\_recalibrate",
     r"tab:pm25", r"sec:pm25", r"tab:passport", r"sec:passport",
 ]:
-    check_text("paper contains " + text[:30], text)
+    check_text_count("paper contains " + text[:30], text,
+                      PAPER_NEEDLE_COUNTS[text], PAPER)
 
 for needle in [
     r"zero catastrophic", r"strictly preserved", r"M = 90",
     r"state-of-the-art", r"22.90", r"21.41", r"56.0", r"55.5",
     r"8.7\%", r"whitened", r"phase-weighted", r"diag(",
     r"solved online", r"B / n_seen", r"higher phase score",
-    r"cannot be pruned",
+    r"cannot be pruned", r"the KRR oracle is not beaten on this dataset",
 ]:
     check_absent("paper stale " + needle, needle)
 
+README_NEEDLE_COUNTS = {
+    '# Spectral Hologram Distiller (SHD v3.15.2)': 1,
+    '### 10. NASA C-MAPSS FD001: remaining useful life on the LOW tail': 1,
+    '0.203': 2,
+    '0.458': 2,
+    '0.465': 1,
+    '324': 1,
+    '55.0': 5,
+    '59.0': 1,
+    '85.3': 1,
+    '993.0': 3,
+    'DomainBank': 7,
+    'PM2.5': 10,
+    'passport_recalibrate': 4,
+    'weighting="uniform"': 2,
+    '13.45': 4,
+    '12.74': 4,
+    '14.52': 2,
+}
+
 for text in [
-    "# Spectral Hologram Distiller (SHD v3.15.0)",
+    "# Spectral Hologram Distiller (SHD v3.15.2)",
     "### 10. NASA C-MAPSS FD001: remaining useful life on the LOW tail",
     "DomainBank", "passport_recalibrate", 'weighting="uniform"',
+    "13.45", "12.74", "14.52",
     # "196.0" lived in the paper only (PM2.5 guard KRR-crit); the README
     # carries the threshold and the Scania official-cost row instead.
     "59.0", "55.0", "PM2.5", "324", "85.3", "0.465", "993.0",
     "0.203", "0.458",
 ]:
-    check_text("readme contains " + text[:30], text, README)
+    check_text_count("readme contains " + text[:30], text,
+                      README_NEEDLE_COUNTS[text], README)
 # "55.5" is a LIVE number in the README (Scania missed failures, SHD row),
 # so it must not be forbidden here; the stale-value watch is the "993.0"
 # positive check above.
-for needle in ["zero catastrophic", "M = 90", "sub-millisecond", "8.7%", "56.0"]:
+for needle in ["zero catastrophic", "M = 90", "sub-millisecond", "8.7%", "56.0",
+               "14.53"]:
     check_absent("readme stale " + needle, needle, README)
 
 # ------------------------------------------------- passport-reference benchmark
@@ -351,8 +511,7 @@ check("passport-ref pm25 sensors in-sample FA", pm_sens["stream_f0.00"]["insampl
 # The background reference must not be reported as a remedy.
 check("passport-ref verdict pm25 label",
       1 if pr["verdict"]["pm25_full_f0.00"]["label"] == "both_broken_fa_1.00" else 0, 1, 0)
-check_text("readme claims the negative result",
-           "background-only spectral passport is not a fix", README)
+check_text_count("readme claims the negative result", "background-only spectral passport is not a fix", 1, README)
 for text in ["background passport fixes", "background-only passport fixes"]:
     check_absent("readme overclaims " + text, text, README)
 
@@ -372,16 +531,16 @@ pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 # v3.13.2: SHD_VERSION in shd/distiller.py is the single source of truth;
 # shd/__init__.py re-exports it (__version__ = SHD_VERSION) instead of
 # duplicating the literal (the duplication is what drifted in v3.10/v3.11).
-check_text("version source 3.15.0", 'SHD_VERSION = "3.15.0"', distiller_src)
-check_text("version re-export", "__version__ = SHD_VERSION", version)
-check_text("pyproject 3.15.0", 'version = "3.15.0"', pyproject)
+check_text("version source 3.15.2", 'SHD_VERSION = "3.15.2"', distiller_src)
+check_text_count("version re-export", "__version__ = SHD_VERSION", 1, version)
+check_text("pyproject 3.15.2", 'version = "3.15.2"', pyproject)
 # The three version carriers must agree; this is the check that would have
 # caught the v3.10.0/v3.11.0 drift before it reached the README title.
 check("version carriers agree",
-      1 if ('SHD_VERSION = "3.15.0"' in distiller_src
+      1 if ('SHD_VERSION = "3.15.2"' in distiller_src
             and "__version__ = SHD_VERSION" in version
-            and 'version = "3.15.0"' in pyproject
-            and "SHD v3.15.0" in README) else 0, 1, 0)
+            and 'version = "3.15.2"' in pyproject
+            and "SHD v3.15.2" in README) else 0, 1, 0)
 
 # --------------------------------------------- presets + gate solver (v3.14.1)
 sys.path.insert(0, str(ROOT))
@@ -417,10 +576,10 @@ check("preset single_scale_low params",
 check("preset single_scale_high params",
       1 if _shd.apply_preset("single_scale_high") == {"rff_mode": "single_high"} else 0, 1, 0)
 portfolio_src = (ROOT / "shd" / "portfolio.py").read_text(encoding="utf-8")
-check_text("gate solver budget 5000", "max_iter=5000", portfolio_src)
-check_text("gate solver fallback recorded", "gate_solver_", portfolio_src)
-check_text("readme documents the logit-C fix", "tune-logit-c", README)
-check_text("readme states the tuned-logit verdict", "Tuned logit beats tuned HGB", README)
+check_text_count("gate solver budget 5000", "max_iter=5000", 4, portfolio_src)
+check_text_count("gate solver fallback recorded", "gate_solver_", 4, portfolio_src)
+check_text_count("readme documents the logit-C fix", "tune-logit-c", 3, README)
+check_text_count("readme states the tuned-logit verdict", "Tuned logit beats tuned HGB", 1, README)
 
 # ------------------------------------- v3.15.0 trade-off / honesty artifacts
 res = load("bench_residual_tradeoff_results.json")
@@ -446,6 +605,249 @@ for b in hard["by_batch"]:
         check_min(f"radar_hard B={b} {name} AUC >= 0.95", agg[name]["auc_median"], 0.95)
     # partial windows are the weak spot: document it, do not hide it
     check_min(f"radar_hard B={b} partial_frac0.25 AUC >= 0.9", agg["partial_frac0.25"]["auc_median"], 0.9)
+
+# ------------------------------------- v3.15.1 shipped global-guard artifact
+# The presets pm25_global / sparse_auto turn the global guard ON. Until
+# v3.15.1 no artifact measured the SHIPPED guard path (the PM2.5 'guard
+# wins' numbers came from a manual K-Means concat in
+# bench_critical_guard.py, a different mechanism). These checks pin the
+# shipped-path artifact AND the trade-off it actually shows.
+gg = load("bench_global_guard_results.json")
+check("guard artifact used the shipped path",
+      1 if "shipped" in gg["guard"]["path"] else 0, 1, 0)
+check("guard artifact n_seeds", gg["n_seeds"], 20, 0)
+check("guard artifact budget", gg["m"], 300, 0)
+g_sum = gg["summary"]
+g_w = gg["wilcoxon"]
+# the guard must improve the GLOBAL fit over the same distiller without it
+check("guard improves global KRR vs no guard (wins)",
+      g_w["guarded_vs_plain_krr_rmse_all"]["wins_guarded"], 20, 0)
+check("guard improves global GBM vs no guard (wins)",
+      g_w["guarded_vs_plain_gbm_rmse_all"]["wins_guarded"], 20, 0)
+check("guard improves global KRR (median)",
+      1 if g_sum["shd_guarded"]["krr_rmse_all"] < g_sum["shd_plain"]["krr_rmse_all"] else 0, 1, 0)
+check("guard improves global GBM (median)",
+      1 if g_sum["shd_guarded"]["gbm_rmse_all"] < g_sum["shd_plain"]["gbm_rmse_all"] else 0, 1, 0)
+# it must NOT be presented as beating K-Means on global fit: on KRR it ties
+# (n.s.), on GBM it loses. The win is on the CRITICAL regime.
+check("guard ties KMeans on global KRR (not a win)",
+      g_w["guarded_vs_kmeans_krr_rmse_all"]["p_value"], 0.1429, 0.01)
+check("guard loses to KMeans on global GBM (documented)",
+      1 if g_sum["shd_guarded"]["gbm_rmse_all"] > g_sum["kmeans"]["gbm_rmse_all"] else 0, 1, 0)
+check("guard beats KMeans on critical KRR (wins)",
+      g_w["guarded_vs_kmeans_krr_rmse_crit"]["wins_guarded"], 15, 0)
+# the honest cost: the guard spends rare-regime rows on global coverage.
+check("guard costs rare rows (documented trade-off)",
+      1 if g_sum["shd_guarded"]["rare_captured_median"]
+      < g_sum["shd_plain"]["rare_captured_median"] else 0, 1, 0)
+check("guard does not hurt the critical regime vs plain",
+      1 if g_sum["shd_guarded"]["krr_rmse_crit"] <= g_sum["shd_plain"]["krr_rmse_crit"] else 0, 1, 0)
+# --------------------------------- v3.15.2 bug-hunt invariants (2026-11-07)
+# Seven defects found by an independent audit and reproduced by hand.
+# Each fix is pinned here so a future refactor cannot silently undo it.
+dist_src = (ROOT / "shd" / "distiller.py").read_text(encoding="utf-8")
+cli_src = (ROOT / "shd" / "cli.py").read_text(encoding="utf-8")
+pf_src = (ROOT / "shd" / "portfolio.py").read_text(encoding="utf-8")
+check_in_function("finalize invalidates a stale guard flag",
+                "def finalize_crystal(", "self._guard_applied = False", dist_src)
+check_in_function("save refuses a crystal older than the stream",
+                "def save_hologram(", "({int(_fin_n)} -> {int(self.n_seen)} rows)", dist_src)
+check_text_count("artifact records tail_quantile", "tail_quantile=np.array([float(self.tail_q)]", 1, dist_src)
+check_text_count("artifact records phase_kappa", "phase_kappa=np.array([float(self.kappa)]", 1, dist_src)
+check_text_count("CLI normalises the output path", "def _npz_path(", 1, cli_src)
+check_text_count("portfolio gate uses one column convention", "self._gate_design(self.krr_crit_.predict(Zg), self.oof_glob_, Zg)", 1, pf_src)
+check_text_count("conformal fit declares model independence", "model_independent: bool = False", 1, pf_src)
+check_text_count("alarm floor survives emergency_band=0", "alarm = (p_c >= self.critical_threshold).astype(float)", 1, pf_src)
+
+# the gate must pin the PUBLISHED VALUES, not only the ordering: a doctored
+# artifact that keeps the ordering (guarded < plain) would pass a
+# relation-only gate. Same pattern as the older artifact checks above.
+check("guard value: plain KRR all", g_sum["shd_plain"]["krr_rmse_all"], 101.1455, 0.011)
+check("guard value: guarded KRR all", g_sum["shd_guarded"]["krr_rmse_all"], 91.5215, 0.011)
+check("guard value: plain GBM all", g_sum["shd_plain"]["gbm_rmse_all"], 93.3596, 0.011)
+check("guard value: guarded GBM all", g_sum["shd_guarded"]["gbm_rmse_all"], 85.859, 0.011)
+check("guard value: guarded KRR r2", g_sum["shd_guarded"]["krr_r2"], 0.0578, 0.011)
+check("guard value: KMeans KRR all", g_sum["kmeans"]["krr_rmse_all"], 90.4025, 0.011)
+check("guard value: KMeans GBM all", g_sum["kmeans"]["gbm_rmse_all"], 77.3806, 0.011)
+check("guard value: plain rare captured", g_sum["shd_plain"]["rare_captured_median"], 26.5, 0.06)
+check("guard value: guarded rare captured", g_sum["shd_guarded"]["rare_captured_median"], 11.5, 0.06)
+check("guard value: plain-vs-guarded p", g_w["guarded_vs_plain_krr_rmse_all"]["p_value"], 1.9073486328125e-06, 1e-12)
+check("guard value: critical-vs-KMeans p", g_w["guarded_vs_kmeans_krr_rmse_crit"]["p_value"], 0.0014324188232421875, 1e-12)
+# the README renders the artifact numbers; pin the rendering too, so a
+# hand-edited README table cannot drift away from the artifact it cites
+check_text_count("README SC crit row", "**18.81 / 0.93 K**", 1, README)
+check_text_count("README Scania official cost", "**18645.0**", 2, README)
+check_text_count("README edge artifact size", "28.9 KB artifact", 1, README)
+check_text_count("README edge 81D size", "184.9 KB", 1, README)
+check_text_count("README guard plain KRR", "101.15", 1, README)
+check_text_count("README guard guarded KRR", "91.52", 2, README)
+check_text_count("README PM2.5 global KRR", "95.08", 1, README)
+
+# --------------------------------------- portfolio artifacts (2026-11-07)
+# The portfolio arm was re-measured FROM SCRATCH (20 seeds, 3 datasets)
+# after the gate column-convention fix; the pre-fix artifact is superseded.
+# The gate must pin the published values, not only the ordering: a stale or
+# doctored artifact must not pass.
+pf_sc = load("bench_portfolio_superconduct_results.json")
+pf_pm = load("bench_portfolio_pm25_results.json")
+pf_re = load("bench_portfolio_reactor_results.json")
+for _nm, _d in (("SC", pf_sc), ("PM2.5", pf_pm), ("reactor", pf_re)):
+    check(f"portfolio {_nm} artifact used 20 seeds", _d["n_seeds"], 20, 0)
+    check(f"portfolio {_nm} artifact is complete",
+          1 if _d.get("partial") is False else 0, 1, 0)
+    check(f"portfolio {_nm} artifact has 20 records", len(_d["records"]), 20, 0)
+    # KNOWN LIMITATION, pinned on purpose: the portfolio's GBM arm fits the
+    # SAME critical coreset as the SHD arm with the same seed, so its GBM
+    # column duplicates SHD by construction and is NOT an independent
+    # portfolio measurement. Only the KRR columns are a portfolio result.
+    check(f"portfolio {_nm} GBM column duplicates the SHD arm",
+          abs(_d["summary"]["portfolio"]["gbm_rmse_all"]
+              - _d["summary"]["shd"]["gbm_rmse_all"]), 0.0, 1e-9)
+    check(f"portfolio {_nm} GBM crit duplicates the SHD arm",
+          abs(_d["summary"]["portfolio"]["gbm_rmse_crit"]
+              - _d["summary"]["shd"]["gbm_rmse_crit"]), 0.0, 1e-9)
+
+check("portfolio SC crit", pf_sc["summary"]["portfolio"]["krr_rmse_crit"], 18.3217, 0.011)
+check("portfolio SC all", pf_sc["summary"]["portfolio"]["krr_rmse_all"], 15.3798, 0.011)
+check("portfolio SC p vs SHD-C crit",
+      pf_sc["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"], 0.0637, 0.001)
+check("portfolio SC p vs SHD-C all",
+      pf_sc["wilcoxon"]["portfolio_vs_shd_krr_rmse_all"]["p"], 0.0296, 0.001)
+check("portfolio SC p vs KT crit",
+      pf_sc["wilcoxon"]["portfolio_vs_kt_krr_rmse_crit"]["p"], 1.9073486328125e-06, 1e-9)
+check("portfolio SC p vs SKT crit",
+      pf_sc["wilcoxon"]["portfolio_vs_skt_krr_rmse_crit"]["p"], 1.9073486328125e-06, 1e-9)
+check("portfolio SC p vs hard-gate crit",
+      pf_sc["wilcoxon"]["portfolio_vs_hard_gate_krr_rmse_crit"]["p"], 1.9073486328125e-05, 1e-9)
+check("portfolio SC SHD-C crit", pf_sc["summary"]["shd"]["krr_rmse_crit"], 18.8053, 0.011)
+check("portfolio SC SHD-C all", pf_sc["summary"]["shd"]["krr_rmse_all"], 15.4225, 0.011)
+check("portfolio SC KT crit", pf_sc["summary"]["kt"]["krr_rmse_crit"], 23.2562, 0.011)
+check("portfolio SC SKT crit", pf_sc["summary"]["skt"]["krr_rmse_crit"], 21.1946, 0.011)
+check("portfolio SC hard-gate crit", pf_sc["summary"]["hard_gate"]["krr_rmse_crit"], 19.5705, 0.011)
+check("portfolio SC crit is a tie with SHD-C (n.s.)",
+      1 if pf_sc["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"] > 0.05 else 0, 1, 0)
+
+check("portfolio PM2.5 crit", pf_pm["summary"]["portfolio"]["krr_rmse_crit"], 228.3143, 0.011)
+check("portfolio PM2.5 all", pf_pm["summary"]["portfolio"]["krr_rmse_all"], 87.0824, 0.011)
+check("portfolio PM2.5 p vs SHD-C crit",
+      pf_pm["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"], 0.5706, 0.001)
+check("portfolio PM2.5 p vs SHD-C all",
+      pf_pm["wilcoxon"]["portfolio_vs_shd_krr_rmse_all"]["p"], 3.814697265625e-06, 1e-9)
+check("portfolio PM2.5 p vs SKT all",
+      pf_pm["wilcoxon"]["portfolio_vs_skt_krr_rmse_all"]["p"], 0.5958, 0.001)
+check("portfolio PM2.5 p vs SKT crit",
+      pf_pm["wilcoxon"]["portfolio_vs_skt_krr_rmse_crit"]["p"], 0.0014324188232421875, 1e-9)
+check("portfolio PM2.5 p vs hard-gate all",
+      pf_pm["wilcoxon"]["portfolio_vs_hard_gate_krr_rmse_all"]["p"], 1.9073486328125e-06, 1e-9)
+check("portfolio PM2.5 SHD-C crit", pf_pm["summary"]["shd"]["krr_rmse_crit"], 231.0096, 0.011)
+check("portfolio PM2.5 SHD-C all", pf_pm["summary"]["shd"]["krr_rmse_all"], 95.0831, 0.011)
+check("portfolio PM2.5 KT all", pf_pm["summary"]["kt"]["krr_rmse_all"], 89.8869, 0.011)
+check("portfolio PM2.5 SKT all", pf_pm["summary"]["skt"]["krr_rmse_all"], 86.5269, 0.011)
+check("portfolio PM2.5 hard-gate crit", pf_pm["summary"]["hard_gate"]["krr_rmse_crit"], 238.3592, 0.011)
+check("portfolio PM2.5 hard-gate all", pf_pm["summary"]["hard_gate"]["krr_rmse_all"], 90.6326, 0.011)
+check("portfolio PM2.5 beats SKT on crit",
+      1 if pf_pm["summary"]["portfolio"]["krr_rmse_crit"]
+      < pf_pm["summary"]["skt"]["krr_rmse_crit"] else 0, 1, 0)
+check("portfolio PM2.5 does NOT beat SKT on global",
+      1 if pf_pm["summary"]["portfolio"]["krr_rmse_all"]
+      > pf_pm["summary"]["skt"]["krr_rmse_all"] else 0, 1, 0)
+
+check("portfolio reactor crit", pf_re["summary"]["portfolio"]["krr_rmse_crit"], 3.6463, 0.006)
+check("portfolio reactor all", pf_re["summary"]["portfolio"]["krr_rmse_all"], 0.9937, 0.006)
+check("portfolio reactor p vs SHD-C crit",
+      pf_re["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"], 9.5367431640625e-06, 1e-9)
+check("portfolio reactor p vs SHD-C all",
+      pf_re["wilcoxon"]["portfolio_vs_shd_krr_rmse_all"]["p"], 0.00365447998046875, 0.001)
+check("portfolio reactor p vs hard-gate crit",
+      pf_re["wilcoxon"]["portfolio_vs_hard_gate_krr_rmse_crit"]["p"], 6.29425048828125e-05, 1e-9)
+check("portfolio reactor SHD-C crit", pf_re["summary"]["shd"]["krr_rmse_crit"], 3.4364, 0.006)
+check("portfolio reactor SHD-C all", pf_re["summary"]["shd"]["krr_rmse_all"], 0.9756, 0.006)
+check("portfolio reactor hard-gate crit", pf_re["summary"]["hard_gate"]["krr_rmse_crit"], 4.2002, 0.006)
+check("portfolio reactor hard-gate all", pf_re["summary"]["hard_gate"]["krr_rmse_all"], 1.1163, 0.006)
+check("portfolio reactor is WORSE than SHD-C on crit",
+      1 if pf_re["summary"]["portfolio"]["krr_rmse_crit"]
+      > pf_re["summary"]["shd"]["krr_rmse_crit"] else 0, 1, 0)
+check("portfolio reactor is WORSE than SHD-C on global",
+      1 if pf_re["summary"]["portfolio"]["krr_rmse_all"]
+      > pf_re["summary"]["shd"]["krr_rmse_all"] else 0, 1, 0)
+
+# the benchmark must keep the duplication visible in its own source, so a
+# future "fix" of the GBM arm breaks the gate instead of silently changing
+# what the published numbers mean
+bench_pf_src = (ROOT / "bench_portfolio.py").read_text(encoding="utf-8")
+check_text_count("bench portfolio GBM arm fits the SHD coreset", ".fit(Xs, ys, sample_weight=ws)", 1, bench_pf_src)
+
+# the published documents must carry the post-fix numbers, and the pre-fix
+# ones must be GONE (a stale number in prose is a silent false claim)
+check_text_count("README portfolio SC crit", "**18.32**", 1, README)
+check_text_count("README portfolio SC global", "**15.38**", 1, README)
+check_text_count("README portfolio PM2.5 global", "**87.08**", 1, README)
+check_text_count("README portfolio PM2.5 crit", "**228.31**", 1, README)
+check_text_count("README portfolio reactor crit", "crit 3.65 vs", 1, README)
+check_text_count("README portfolio p (SC crit)", "p=0.064", 2, README)
+check_text_count("README documents the GBM duplication", "GBM column duplicates the SHD arm", 1, README)
+check_absent("README no stale portfolio crit", "crit **17.95**", README)
+check_absent("README no stale portfolio PM2.5 crit", "**227.27**", README)
+check_absent("README no stale portfolio global", "**86.67**", README)
+check_absent("README no in-flight marker", "Re-measurement in flight", README)
+check_absent("README no stale Pareto claim", "Pareto-best: crit", README)
+check_text_count("industry doc portfolio SC crit", "**18.32**", 1, INDUSTRY)
+check_text_count("industry doc portfolio PM2.5 global", "**87.08**", 1, INDUSTRY)
+check_text_count("industry doc portfolio reactor", "3.65 vs 3.44", 2, INDUSTRY)
+check_absent("industry doc no stale SC crit", "**17.95**", INDUSTRY)
+check_absent("industry doc no stale PM2.5 crit", "**227.27**", INDUSTRY)
+check_absent("industry doc no stale global", "**86.67**", INDUSTRY)
+check_absent("industry doc no stale Pareto claim",
+             "Pareto-лучший**: crit", INDUSTRY)
+
+# the manifest must list EVERY artifact that ships in the repo root, and
+# every manifest row must point at a file that exists. An artifact that
+# pins claims in this gate but is missing from ARTIFACTS.md is an
+# untracked claim - exactly the drift this manifest exists to prevent.
+_manifest = (ROOT / "ARTIFACTS.md").read_text(encoding="utf-8")
+_root_jsons = sorted(p.name for p in ROOT.glob("*.json"))
+_missing = [n for n in _root_jsons if (chr(96) + n + chr(96)) not in _manifest]
+if _missing:
+    print("  artifacts missing from ARTIFACTS.md:", _missing)
+check("ARTIFACTS.md lists every root artifact", len(_missing), 0, 0)
+_rows = [l for l in _manifest.splitlines() if l.startswith("| " + chr(96))]
+_ghosts = []
+for _l in _rows:
+    _cell = _l.split("|")[1].strip().strip(chr(96))
+    if "*" in _cell or "?" in _cell:
+        _ghosts.append(_cell + " (glob)")
+        continue
+    if not any((d / _cell).exists() for d in
+               (ROOT, ROOT / "paper", ROOT / "artifacts", ROOT / "docs")):
+        _ghosts.append(_cell + " (absent)")
+if _ghosts:
+    print("  manifest rows without a real file:", _ghosts)
+check("ARTIFACTS.md rows point at real files", len(_ghosts), 0, 0)
+
+# the summaries are medians OVER THE PER-SEED RECORDS: pin that relation so
+# a doctored record (with the summary left intact) cannot slip through, and
+# so the published numbers stay a function of the raw rows.
+for _nm, _d in (("SC", pf_sc), ("PM2.5", pf_pm), ("reactor", pf_re)):
+    for _arm in ("shd", "kt", "skt", "portfolio", "hard_gate"):
+        for _metric in ("krr_rmse_all", "krr_rmse_crit"):
+            _vals = [r[_arm][_metric] for r in _d["records"] if _metric in r[_arm]]
+            if not _vals:
+                continue
+            check(f"portfolio {_nm} {_arm} {_metric} is the median of its records",
+                  abs(float(statistics.median(_vals))
+                      - float(_d["summary"][_arm][_metric])), 0.0, 1e-9)
+for _arm in ("shd_plain", "shd_guarded", "kmeans"):
+    _vals = [r[_arm]["krr_rmse_all"] for r in gg["records"] if _arm in r]
+    if not _vals:
+        continue
+    check(f"guard {_arm} KRR all is the median of its records",
+          abs(float(statistics.median(_vals))
+              - float(g_sum[_arm]["krr_rmse_all"])), 0.0, 1e-9)
+
+check_digest("portfolio SC artifact digest", artifact_digest(pf_sc), "beb4cb166c8262c5fc6fbce125cb3fc21400e26d84bfed1e9e6d6daef94bbf0d")
+check_digest("portfolio PM2.5 artifact digest", artifact_digest(pf_pm), "5bd9ae9e63e1752dc679e3bef9122263fd15d9d6dbfe4464e53ce80426782188")
+check_digest("portfolio reactor artifact digest", artifact_digest(pf_re), "f6c2ded19c12c4d301c79e87b8f6cdf3ebe774acc85e34a3dcb61e9fd9b73521")
+check_digest("global-guard artifact digest", artifact_digest(gg), "ae096e1578291373babce23253cfb3cd699bd45df5d47d053700d7f949ee1ce9")
 
 print(f"\n{checks} checks, {len(failures)} failures")
 if failures:

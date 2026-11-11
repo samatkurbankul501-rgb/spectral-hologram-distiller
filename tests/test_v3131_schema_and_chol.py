@@ -177,5 +177,5 @@ def test_cholesky_cache_is_invalidated_by_external_psi_sum_write():
 def test_package_version_matches_SHD_VERSION():
     from shd import SHD_VERSION, __version__
 
-    assert SHD_VERSION == "3.15.0"
+    assert SHD_VERSION == "3.15.2"
     assert __version__ == SHD_VERSION

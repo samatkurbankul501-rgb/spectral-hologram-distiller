@@ -304,3 +304,203 @@ def test_cli_preset_and_explicit_flags_roundtrip(tmp_path):
     Xb, yb, _ = b.get_training_data()
     assert np.allclose(Xa, Xb)
     assert np.allclose(ya, yb)
+
+# ------------------------------------------------- v3.15.1 Banner fixes ----
+#
+# These pin the BEHAVIOUR the v3.15.1 patch claims. The first version of the
+# patch shipped three dead branches and one vacuous test; each test below
+# fails against that version.
+
+def test_guard_works_with_default_settings_and_covers_the_whole_stream(tmp_path):
+    """Banner fix 1 (real defect): with the shipped default
+    (``lattice_rebuild_interval=0``) the guard had NO donor rows at all and
+    ``save_hologram()`` raised ValueError. The guard now owns a uniform
+    donor reservoir fed on every batch, so it works out of the box and its
+    donors cover the WHOLE stream -- not only the warm-up window."""
+    X, y = _synthetic(n=6000, d=4, seed=0)
+    dist = SpectralHologramDistiller(crystal_size=60, sketch_dim=32,
+                                     random_state=0,
+                                     global_guard=True,
+                                     max_init_buffer=4500)
+    for i in range(0, len(X), 2000):
+        dist.partial_fit(X[i:i + 2000], y[i:i + 2000])
+    dist.finalize_crystal()
+    assert dist.n_seen > 4500
+    # every streamed row was offered to the donor reservoir
+    assert dist._donor_seen == dist.n_seen
+    # and the guard now succeeds instead of raising
+    report = dist.build_global_guard(n_global=30, weight=0.35)
+    assert report["swapped"] == 30
+    # the donor pool is a sample of the whole stream, not a prefix of it:
+    # the retained rows must reach the END of the stream
+    assert dist._donor_idx, "donor pool is empty"
+    assert max(dist._donor_idx) > 0.9 * dist.n_seen
+    assert min(dist._donor_idx) < 0.1 * dist.n_seen
+
+
+def test_guard_saves_under_the_shipped_preset(tmp_path):
+    """The shipped ``pm25_global`` preset must not crash on save."""
+    X, y = _synthetic(n=3000, d=4, seed=0)
+    dist = SpectralHologramDistiller(crystal_size=60, sketch_dim=32,
+                                     random_state=0,
+                                     **apply_preset("pm25_global"))
+    for i in range(0, len(X), 1500):
+        dist.partial_fit(X[i:i + 1500], y[i:i + 1500])
+    dist.finalize_crystal()
+    out = str(tmp_path / "preset.hologram.npz")
+    dist.save_hologram(out)   # must not raise
+    assert dist._guard_applied is True
+    assert os.path.exists(out)
+
+
+def test_second_save_does_not_reapply_the_guard(tmp_path):
+    """Banner fix 2: the guard swaps rows, so re-running it on an already
+    guarded crystal would silently replace guarded rows with fresh donors.
+    The second save must warn and leave the crystal untouched."""
+    import warnings
+    X, y = _synthetic(n=3000, d=4, seed=0)
+    dist = SpectralHologramDistiller(crystal_size=60, sketch_dim=32,
+                                     random_state=0,
+                                     global_guard=True)
+    for i in range(0, len(X), 1500):
+        dist.partial_fit(X[i:i + 1500], y[i:i + 1500])
+    dist.finalize_crystal()
+    out1 = str(tmp_path / "g1.hologram.npz")
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        dist.save_hologram(out1)
+    assert dist._guard_applied is True
+    w_before = np.array(dist.gamma_weights)
+    Xc_before = np.array(dist.crystal_X)
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        dist.save_hologram(str(tmp_path / "g2.hologram.npz"))
+    # the second save MUST warn that it skipped the guard
+    assert any("already applied" in str(w.message) for w in rec)
+    # and the crystal must be untouched
+    assert np.allclose(w_before, np.array(dist.gamma_weights))
+    assert np.allclose(Xc_before, np.array(dist.crystal_X))
+
+
+def test_guard_flag_is_not_set_when_the_guard_fails(tmp_path):
+    """The guard flag must only be set after the crystal was really
+    mutated, so a failure cannot leave a half-guarded crystal claiming a
+    completed guard."""
+    X, y = _synthetic(n=2000, d=4, seed=0)
+    dist = SpectralHologramDistiller(crystal_size=60, sketch_dim=32,
+                                     random_state=0, global_guard=True)
+    for i in range(0, len(X), 1000):
+        dist.partial_fit(X[i:i + 1000], y[i:i + 1000])
+    dist.finalize_crystal()
+    with pytest.raises(ValueError):
+        # n_global larger than the crystal -> the guard raises before mutating
+        dist.build_global_guard(n_global=10_000, weight=0.35)
+    assert dist._guard_applied is False
+
+
+def test_heal_reports_still_shifted_when_partial(tmp_path):
+    """Banner fix 3: heal must surface still_shifted + threshold when the
+    blend leaves bw_after above the radar threshold."""
+    import numpy as _np
+    X, y = _synthetic(n=5000, d=4, seed=0)
+    dist = SpectralHologramDistiller(crystal_size=60, sketch_dim=32,
+                                     random_state=0)
+    for i in range(0, len(X), 2000):
+        dist.partial_fit(X[i:i + 2000], y[i:i + 2000])
+    dist.finalize_crystal()
+    out = str(tmp_path / "c.heal.hologram.npz")
+    dist.save_hologram(out)
+    from shd import HologramCrystalLoader
+    ld = HologramCrystalLoader(out)
+    # shifted window: strong mean shift
+    Xs = X + 8.0
+    rep = ld.check_domain_shift(Xs)
+    assert rep["is_shifted"]
+    res = ld.heal_domain_shift(Xs, force=True)
+    assert "still_shifted" in res and "threshold" in res
+    assert res["threshold"] > 0
+    assert res["threshold_source"] in ("default", "calibrated")
+
+
+def test_low_skewed_target_warns_that_tail_high_protects_the_wrong_side():
+    """Banner fix 4: ``tail='high'`` on a low-tailed target (pressure sag
+    shape) must warn. The old block read ``init_Y`` AFTER the lattice build
+    had emptied it, so the warning could never fire."""
+    import warnings
+    rng = np.random.default_rng(7)
+    n = 4000
+    X = rng.normal(size=(n, 4))
+    # 30% of the rows sit in a low tail: median well above the mean
+    y = np.where(rng.random(n) < 0.30,
+                 -10.0 + rng.normal(scale=0.5, size=n),
+                 rng.normal(scale=0.5, size=n))
+    dist = SpectralHologramDistiller(crystal_size=60, sketch_dim=32,
+                                     random_state=0, max_init_buffer=2000)
+    for i in range(0, n, 1000):
+        dist.partial_fit(X[i:i + 1000], y[i:i + 1000])
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        dist.finalize_crystal()
+    msgs = [str(w.message) for w in rec if "left-skewed" in str(w.message)]
+    assert msgs, "the low-tail warning never fired"
+    assert "tail='low'" in msgs[0]
+
+
+def test_no_skew_warning_on_a_normal_target():
+    """The skew hint must not fire on an ordinary distribution."""
+    import warnings
+    X, y = _synthetic(n=3000, d=4, seed=0)
+    dist = SpectralHologramDistiller(crystal_size=60, sketch_dim=32,
+                                     random_state=0, max_init_buffer=2000)
+    for i in range(0, len(X), 1000):
+        dist.partial_fit(X[i:i + 1000], y[i:i + 1000])
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        dist.finalize_crystal()
+    assert not [w for w in rec if "left-skewed" in str(w.message)]
+
+
+def test_no_skew_warning_when_tail_is_low():
+    """``tail='low'`` is the CORRECT setting for a low-tailed target: no
+    warning, because nothing is misconfigured."""
+    import warnings
+    rng = np.random.default_rng(7)
+    n = 3000
+    X = rng.normal(size=(n, 4))
+    y = np.where(rng.random(n) < 0.30,
+                 -10.0 + rng.normal(scale=0.5, size=n),
+                 rng.normal(scale=0.5, size=n))
+    dist = SpectralHologramDistiller(crystal_size=60, sketch_dim=32,
+                                     random_state=0, max_init_buffer=2000,
+                                     tail="low")
+    for i in range(0, n, 1000):
+        dist.partial_fit(X[i:i + 1000], y[i:i + 1000])
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        dist.finalize_crystal()
+    assert not [w for w in rec if "left-skewed" in str(w.message)]
+def test_low_skewed_target_warns_when_the_lattice_is_built_in_finalize():
+    """Regression (v3.15.1 re-check): the skew hint must ALSO fire when the
+    lattice is built INSIDE finalize_crystal -- i.e. when the whole stream
+    fits in the warm-up buffer (the default buffer is 8192 rows, so this is
+    the common case). The first fix read the captured skew BEFORE the lattice
+    build, so on that path the value was still None and the hint stayed
+    silent -- the same class of dead warning the patch was meant to remove.
+    """
+    import warnings
+    rng = np.random.default_rng(7)
+    n = 1500                     # < max_init_buffer -> lattice built in finalize
+    X = rng.normal(size=(n, 4))
+    y = np.where(rng.random(n) < 0.30,
+                 -10.0 + rng.normal(scale=0.5, size=n),
+                 rng.normal(scale=0.5, size=n))
+    dist = SpectralHologramDistiller(crystal_size=60, sketch_dim=32,
+                                     random_state=0, max_init_buffer=8192)
+    dist.partial_fit(X, y)
+    assert not dist.lattice_ready, "precondition: the lattice must not be ready yet"
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        dist.finalize_crystal()
+    msgs = [str(w.message) for w in rec if "left-skewed" in str(w.message)]
+    assert msgs, "the low-tail warning stayed silent on the finalize-builds-lattice path"
+    assert "tail='low'" in msgs[0]

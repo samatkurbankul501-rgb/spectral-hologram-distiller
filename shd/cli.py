@@ -84,6 +84,21 @@ def _load_tabular(path: str, target_col: int | None = None, delimiter: str | Non
     return X_raw, y_raw
 
 
+def _npz_path(path: str) -> str:
+    """Return the path numpy will actually write.
+
+    np.savez_compressed appends .npz when the name lacks it, so a
+    user-supplied -o out.hologram writes out.hologram.npz -- and the
+    follow-up getsize/reload then fails on the ORIGINAL name
+    (FileNotFoundError) while a stray file stays on disk. Normalising
+    the name once keeps writing, measuring and reporting on one path.
+    """
+    p = str(path)
+    if not p.lower().endswith(".npz"):
+        p = p + ".npz"
+    return p
+
+
 def cmd_inspect(args: argparse.Namespace) -> int:
     loader = HologramCrystalLoader(
         args.crystal, include_deltas=True if args.include_deltas else None
@@ -109,11 +124,12 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     before = loader.summary()
     # Loader.save() persists the current crystals; optional projector is
     # kept if present (otherwise migration still yields a versioned file).
-    size_kb = loader.save(args.output)
-    after = HologramCrystalLoader(args.output).summary()
+    out_path = _npz_path(args.output)
+    size_kb = loader.save(out_path)
+    after = HologramCrystalLoader(out_path).summary()
     out = {
         "input": args.crystal,
-        "output": args.output,
+        "output": out_path,
         "file_size_kb": round(float(size_kb), 2),
         "before": {
             "schema_version": before["schema_version"],
@@ -200,9 +216,12 @@ def cmd_distill(args: argparse.Namespace) -> int:
         yb = None if y is None else y[i : i + B]
         distiller.partial_fit(X[i : i + B], yb)
     rel_err = distiller.finalize_crystal()
-    size_kb = distiller.save_hologram(args.output, include_projector=True)
+    # v3.15.2: numpy appends .npz to a name that lacks it; writing,
+    # measuring and reporting must use the SAME name.
+    out_path = _npz_path(args.output)
+    size_kb = distiller.save_hologram(out_path, include_projector=True)
     out = {
-        "output": args.output,
+        "output": out_path,
         "file_size_kb": round(float(size_kb), 2),
         "n_seen": int(distiller.n_seen),
         "crystal_size": int(len(distiller.crystal_X)),
@@ -240,7 +259,7 @@ def cmd_heal(args: argparse.Namespace) -> int:
         streaming=args.streaming,
     )
     if args.output:
-        out_path = args.output
+        out_path = _npz_path(args.output)
     else:
         # v3.14.2 non-destructive default: never overwrite the input crystal.
         # c.hologram.npz -> c_healed.hologram.npz; c.npz -> c_healed.npz
@@ -249,6 +268,9 @@ def cmd_heal(args: argparse.Namespace) -> int:
             out_path = base[: -len(".hologram")] + "_healed.hologram" + ext
         else:
             out_path = base + "_healed" + ext
+        # v3.15.2: the derived name may still lack .npz (a crystal named
+        # c.hologram); normalise it like an explicit -o.
+        out_path = _npz_path(out_path)
     if res["healed"]:
         size_kb = loader.save(out_path)
         res["output"] = out_path

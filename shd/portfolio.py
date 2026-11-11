@@ -18,13 +18,16 @@ Two deployable answers to the two weaknesses the industry comparison left open:
 2. :class:`ConformalCrystal` -- uncertainty. Split-conformal intervals built
    on the rows a crystal already holds: no extra data, no extra model fit,
    and a distribution-free marginal coverage guarantee for exchangeable
-   calibration rows. Nothing like this ships with Kernel Thinning or
-   Supervised KT.
+   calibration rows scored by a model fitted on OTHER rows (fit() warns
+   when that independence is not declared). Nothing like this ships with
+   Kernel Thinning or Supervised KT.
 
 Both classes are opt-in: the distiller's defaults are untouched.
 """
 
 from __future__ import annotations
+
+import warnings
 
 import numpy as np
 from sklearn.kernel_ridge import KernelRidge
@@ -176,9 +179,24 @@ class CoresetPortfolio:
         # out-of-fold prediction (leakage-free); the OTHER expert contributes
         # its full-fit prediction -- it did not train on these rows, so its
         # full prediction is already out-of-sample.
+        # v3.15.2: ONE column convention for both blocks: slot0 is ALWAYS
+        # the CRITICAL expert prediction and slot1 is ALWAYS the global
+        # expert prediction -- exactly what gate_weights() builds at
+        # inference time. The previous code put each block OWN expert in
+        # slot0 (critical block: crit in slot0; global block: global in
+        # slot0), so the stacker learned from two opposite conventions and
+        # transferred nothing to inference, where slot0 is always the
+        # critical expert. Measured on the two-expert probe: 55% of
+        # global-domain rows were routed to the CRITICAL expert (correct:
+        # about 10%); portfolio RMSE 28.97 vs 15.54 with one convention.
+        #
+        # Leakage-free property preserved: on the critical rows the
+        # critical expert contributes its OUT-OF-FOLD prediction, on the
+        # global rows the global expert does; the other expert full-fit
+        # prediction is out-of-sample for those rows by construction.
         D = np.vstack([
             self._gate_design(self.oof_crit_, self.krr_glob_.predict(Zc), Zc),
-            self._gate_design(self.oof_glob_, self.krr_crit_.predict(Zg), Zg),
+            self._gate_design(self.krr_crit_.predict(Zg), self.oof_glob_, Zg),
         ])
         src = np.concatenate([np.ones(len(Zc)), np.zeros(len(Zg))])
         # Stacker solver: lbfgs, the solver the committed v3.14.0 artifacts
@@ -249,11 +267,19 @@ class CoresetPortfolio:
         p_g = self.krr_glob_.predict(Z)
         D = self._gate_design(p_c, p_g, Z)
         w = self.gate_.predict_proba(D)[:, 1]
+        # Alarm priority: the critical expert own prediction AT or ABOVE
+        # the threshold floors the weight at 1.0; the band only EXTENDS that
+        # region downwards. v3.15.2: the whole branch used to be guarded by
+        # emergency_band_ > 0.0, so an explicit emergency_band=0.0 silently
+        # disabled the documented above-the-threshold override (measured:
+        # min w 0.658 where the docstring promises 1.0).
+        alarm = (p_c >= self.critical_threshold).astype(float)
         if self.emergency_band_ > 0.0:
-            # Alarm priority: the critical expert's own prediction near or
-            # above the threshold floors the weight at 1.0. Deterministic,
-            # expert-consistent (no third model), and cheap.
-            w = np.maximum(w, (p_c >= self.critical_threshold - self.emergency_band_).astype(float))
+            alarm = np.maximum(
+                alarm,
+                (p_c >= self.critical_threshold - self.emergency_band_).astype(float),
+            )
+        w = np.maximum(w, alarm)
         return w
 
     def expert_predictions(self, X_new: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -343,6 +369,8 @@ class ConformalCrystal:
         y_cal: np.ndarray,
         scaler=None,
         model=None,
+        *,
+        model_independent: bool = False,
     ) -> "ConformalCrystal":
         """Calibrate on crystal rows ``(X_cal, y_cal)``.
 
@@ -367,6 +395,27 @@ class ConformalCrystal:
         if len(pred) != len(y):
             raise ValueError("model.predict() returned the wrong number of rows")
         resid = np.abs(y - pred)
+        # v3.15.2: the calibration residuals are computed by scoring the
+        # CALIBRATION rows themselves. Unless that model was fitted on
+        # data independent of these rows, the residuals are IN-SAMPLE and
+        # the split-conformal coverage guarantee does NOT hold (measured:
+        # 0.83 coverage at alpha=0.10 against a 0.90 target; an
+        # independently fitted model reaches 0.89). Say it out loud
+        # instead of shipping a nominal-looking interval.
+        if not model_independent:
+            warnings.warn(
+                "ConformalCrystal.fit(): the calibration residuals are scored with "
+                "the given model on the calibration rows themselves. Unless that "
+                "model was fitted on data independent of these rows, the residuals "
+                "are in-sample and the split-conformal coverage guarantee does NOT "
+                "hold in general: measured 0.83 coverage at alpha=0.10 against a "
+                "0.90 target when the model overfits the calibration rows, and "
+                "0.87 vs 0.89 with a heavily regularised model - the size of the "
+                "violation is model-dependent, so the independence has to be "
+                "declared, not assumed. Pass model_independent=True to state that "
+                "the model was fitted on other rows.",
+                UserWarning, stacklevel=2,
+            )
 
         d = cdist(Z, Z)
         np.fill_diagonal(d, np.inf)  # never the row itself

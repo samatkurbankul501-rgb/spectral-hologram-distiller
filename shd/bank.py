@@ -19,6 +19,23 @@ import numpy as np
 from .distiller import HologramCrystalLoader
 
 
+def _loader_widths(loader: HologramCrystalLoader) -> set[int]:
+    """Feature widths a loader accepts for a stream window.
+
+    The loader's own contract is the width of ``X_mean`` (d for a plain
+    crystal, 2d for a delta one) -- NOT ``loader.X.shape[1]``, which is
+    the raw medoid width even for a delta crystal. v3.15.1: the bank used
+    the raw width, so for a legacy delta artifact (include_deltas
+    postdates the file) it accepted windows the loader rejects and
+    rejected the width the loader actually takes.
+    """
+    widths = {int(len(loader.X_mean))}
+    if loader.include_deltas:
+        d_raw = int(loader.X.shape[1])
+        widths |= {d_raw, 2 * d_raw}
+    return widths
+
+
 class DomainBank:
     """A collection of per-domain crystals with nearest-passport routing.
 
@@ -80,14 +97,11 @@ class DomainBank:
             w = None  # let each loader's own validation raise
         candidates = []
         for i, loader in enumerate(self.loaders):
-            d_raw = loader.X.shape[1]
-            valid = {d_raw, 2 * d_raw} if loader.include_deltas else {d_raw}
-            if w is None or w in valid:
+            if w is None or w in _loader_widths(loader):
                 candidates.append(i)
         if not candidates:
             widths = sorted({w_ for l in self.loaders
-                             for w_ in ({l.X.shape[1], 2 * l.X.shape[1]}
-                                        if l.include_deltas else {l.X.shape[1]})})
+                             for w_ in _loader_widths(l)})
             raise ValueError(
                 f"no crystal in the bank can score a {w}-feature window; "
                 f"feature widths the bank understands: {widths}"
