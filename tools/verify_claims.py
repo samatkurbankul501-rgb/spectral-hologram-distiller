@@ -491,6 +491,32 @@ for needle in ["zero catastrophic", "M = 90", "sub-millisecond", "8.7%", "56.0",
                "14.53"]:
     check_absent("readme stale " + needle, needle, README)
 
+# ------------------------------------- ablation paragraph (2026-11-11 follow-up)
+# The v3.15.0 paragraph quoted a 20-seed sweep that no committed artifact
+# contains. Pin the paragraph to the 5-seed sweep and its 10-seed CI
+# replication, and forbid the fabricated strings so they cannot return.
+ab = load("bench_ablation_results.json")["reactor"]["sweeps"]
+ab_ci = load("bench_ablation_ci_summary.json")["reactor"]
+ab_k = {e["value"]: e["krr_rmse_crit_median"] for e in ab["phase_kappa"]}
+ab_b = {e["value"]: e["krr_rmse_crit_median"] for e in ab["high_band_ratio"]}
+check("ablation kappa=0 crit", ab_k[0.0], 4.199, 0.001)
+check("ablation default crit", ab_k[3.2], 3.346, 0.001)
+check("ablation br=0.10 crit", ab_b[0.1], 4.433, 0.001)
+check("ablation br=0.50 crit", ab_b[0.5], 2.718, 0.001)
+check("ablation CI kappa=0 crit", ab_ci["phase_kappa"]["0.0"]["median"], 4.132, 0.001)
+check("ablation CI br=0.10 crit", ab_ci["high_band_ratio"]["0.1"]["median"], 4.249, 0.001)
+check("ablation CI default crit", ab_ci["phase_kappa"]["3.2"]["median"], 3.440, 0.001)
+for text in [
+    "1.09 K (3.346 -> 4.433 K)",
+    "+0.85 K (3.346 -> 4.199 K)",
+    "lowers it to 2.718 K",
+    "kappa=0 median 4.132, br=0.10 median 4.249, default 3.440",
+]:
+    check_text_count("readme ablation " + text[:30], text, 1, README)
+for needle in ["3.44 -> 4.53", "lowers it to 2.30", "+1.35 K", "+0.86 K",
+               "kappa=0.65"]:
+    check_absent("readme fabricated ablation " + needle, needle, README)
+
 # ------------------------------------------------- passport-reference benchmark
 pr = load("bench_passport_reference_results.json")
 syn = pr["arms"]["synthetic"]

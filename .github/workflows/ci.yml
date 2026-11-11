@@ -11,7 +11,7 @@
 #   this is where a stale "version =" would break first.
 # * tests/run_smoke.py  -- dependency-free tier, exact PASS/FAIL lines.
 # * pytest tests -q  -- the full suite (golden numbers included).
-# * tools/verify_claims.py  -- README/paper/artifact claims audit (458 checks),
+# * tools/verify_claims.py  -- README/paper/artifact claims audit (474 checks),
 #   including the version-carriers-agree invariant.
 #
 # The MetroPT-3 / PM2.5 / superconduct artifacts live in git (58 files under
@@ -64,7 +64,7 @@ jobs:
       - name: Install package + pytest
         run: |
           python -m pip install --upgrade pip
-          PIP_CONSTRAINT=requirements-ci.txt python -m pip install -e . pytest
+          python -m pip install -e . pytest "${{ matrix.numpy-pin }}"
       - name: Full pytest suite
         run: python -m pytest tests -q
       - name: Claims audit (README/paper vs artifacts)

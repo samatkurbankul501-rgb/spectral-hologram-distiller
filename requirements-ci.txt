@@ -1,4 +1,0 @@
-# CI-only constraints: the OLDEST supported stack, exercised by the "full" job
-# (python 3.10) to catch NumPy 2.x-only regressions. The normal install path is
-# the package's own metadata (numpy>=1.24, scipy>=1.10, scikit-learn>=1.3).
-numpy==1.24.*

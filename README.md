@@ -68,8 +68,14 @@
 > docstring now states the true contract and `finalize_crystal()` warns
 > when a prefix-only stream outgrew its warm-up window. The claim gate
 > also triple-counted six `check_absent` needles: deduplicated, 470 -> 458
-> checks. Regressions: `tests/test_audit_2026_11_11.py` (5 tests). The
-> claim gate stands at 458 checks, the suite at 247 tests.
+> checks. Regressions: `tests/test_audit_2026_11_11.py` (5 tests). A follow-up
+> the same day rewrote a v3.15.0 ablation paragraph that quoted a 20-seed
+> sweep no committed artifact contains: it now quotes the 5-seed sweep and
+> its 10-seed CI replication, and the gate pins both (plus five forbidden
+> fabricated strings). The CI full tier's NumPy pin now follows the build
+> matrix; the shared constraint file had pinned NumPy 1.24 under Python
+> 3.12, where it has no wheel. The claim gate stands at 474 checks, the
+> suite at 247 tests.
 > **v3.14.1 (2026-10-24): measured Scania logit diagnosis, machine-readable
 > presets, and an honest gate-solver budget.** Three tails from the v3.14.0
 > weakness map, each closed by measurement:
@@ -500,7 +506,7 @@ the previous commit: identical crystals, weights, slices and radar distances).
 Two honest conclusions: (i) the published defaults are conservative, not
 tuned-to-death — per-dataset tuning gives up to ~19% better critical RMSE
 (`high_band_ratio=0.5`, `tail_quantile=94`), which is expected behaviour for a
-coreset method and should be done on validation data; (ii) along with `phase_kappa`, the band width is co-primary: 0.26->0.10 raises critical RMSE by 1.09 K (3.44 -> 4.53 K); 0.65 lowers it to 2.30 K. kappa=0 costs +1.35 K (20/20, p=1.9e-6); kappa=0.65 costs +0.86 K (20/20). Removing the phase manifold is catastrophic, but it is not the only sensitive knob — tune kappa and band width both on validation data.
+coreset method and should be done on validation data; (ii) along with `phase_kappa`, the band width is co-primary: on the 5-seed reactor sweep 0.26->0.10 raises critical RMSE by 1.09 K (3.346 -> 4.433 K) and kappa=0 costs +0.85 K (3.346 -> 4.199 K); widening the band to 0.50 lowers it to 2.718 K. The 10-seed CI replication agrees in direction (kappa=0 median 4.132, br=0.10 median 4.249, default 3.440; `bench_ablation_ci_summary.json`). Removing the phase manifold is catastrophic, but it is not the only sensitive knob — tune kappa and band width both on validation data.
 
 ### Input robustness
 
