@@ -284,6 +284,11 @@ class SpectralHologramDistiller:
         # Raw ratio kept for artifact persistence: heal_domain_shift protects
         # this fraction of the old crystal's phase-peak band when pruning.
         self.high_band_ratio = float(high_band_ratio)
+        # The band fraction the lattice ACTUALLY allocated. Equals the raw
+        # ratio unless auto_band_ratio recomputed it from the critical
+        # fraction; persisted so the loader's slice/heal quota matches the
+        # band the crystal was built from (2026-11-13 hunt finding U).
+        self._effective_band_ratio = float(high_band_ratio)
         self.M_low = crystal_size - self.M_high
         self.k = sketch_dim
         self.beta_low = beta_low
@@ -379,6 +384,15 @@ class SpectralHologramDistiller:
         self.unsupervised_mode = False
         self._mode = None  # "supervised" | "label_free", locked by the first non-empty batch
         self._prev_X_row = None
+        # True temporal first-difference statistics (delta streams only),
+        # accumulated in _augment_deltas as the stream flows. Persisted so the
+        # loader's mean-shift term z-scores the dx channels against the REAL
+        # temporal difference scale, not differences of count-ordered medoids
+        # (2026-11-13 hunt finding Y: the latter inflated dx std 4-5x on
+        # autocorrelated telemetry and desensitized the trend alarm ~3.3x).
+        self._dx_sum = None
+        self._dx_sumsq = None
+        self._dx_n = 0
 
         self.init_Z, self.init_X, self.init_Y, self.init_U, self.init_score = [], [], [], [], []
         self.lattice_ready = False
@@ -517,6 +531,17 @@ class SpectralHologramDistiller:
             dX[0] = X_batch[0] - self._prev_X_row
         if update_state and len(X_batch) > 0:
             self._prev_X_row = X_batch[-1].copy()
+            # Accumulate the TRUE temporal dx statistics (finding Y). This is
+            # the only place that sees continuity-correct differences; the
+            # medoid cloud the loader stores is count-ordered, so its own
+            # first differences are not temporal and inflate the dx scale.
+            if self._dx_sum is None or len(self._dx_sum) != dX.shape[1]:
+                self._dx_sum = np.zeros(dX.shape[1], dtype=np.float64)
+                self._dx_sumsq = np.zeros(dX.shape[1], dtype=np.float64)
+                self._dx_n = 0
+            self._dx_sum += dX.sum(axis=0)
+            self._dx_sumsq += np.square(dX).sum(axis=0)
+            self._dx_n += int(len(dX))
         return np.hstack([X_batch, dX])
 
     def _normalize_X(self, X_batch: np.ndarray, update_state: bool = False) -> np.ndarray:
@@ -623,6 +648,10 @@ class SpectralHologramDistiller:
         c_high = self._seed_kmeans_pp(ZY_high, m_high)
         centers_ZY = np.vstack([c_low, c_high])
         M_total = len(centers_ZY)
+        # Record the band fraction actually allocated (finding U): with
+        # auto_band_ratio this differs from the constructor's raw ratio, and
+        # the loader must protect/serve THIS band, not the raw one.
+        self._effective_band_ratio = (m_high / M_total) if M_total else float(self.high_band_ratio)
 
         # 2. Lloyd relaxation on the phase manifold.
         for _ in range(4):
@@ -1746,6 +1775,13 @@ class SpectralHologramDistiller:
             # it was distilled at.
             tail_quantile=np.array([float(self.tail_q)], dtype=np.float64),
             phase_kappa=np.array([float(self.kappa)], dtype=np.float64),
+            # 2026-11-13 (hunt finding U): the band fraction actually allocated.
+            # For auto_band_ratio crystals the raw high_band_ratio above is NOT
+            # the band the lattice built; the loader's slice/heal quota must
+            # follow the effective ratio. Optional keys: legacy loaders ignore
+            # them, legacy artifacts load unchanged.
+            auto_band_ratio=np.array(bool(self.auto_band_ratio and self.critical_threshold is not None)),
+            effective_band_ratio=np.array([float(self._effective_band_ratio)], dtype=np.float64),
             y_labelled=np.ones(len(self.crystal_Y), dtype=bool),
             # v3.14.2: label-free crystals store a synthetic novelty coordinate
             # (spectral leverage) in crystal_Y, not measured targets. Optional
@@ -1753,6 +1789,13 @@ class SpectralHologramDistiller:
             # ignore it, older artifacts load as label_free=False.
             label_free=np.array(bool(self.unsupervised_mode)),
         )
+        if self.include_deltas and self._dx_n > 0:
+            # 2026-11-13 (hunt finding Y): true temporal first-difference
+            # statistics of the stream, for the loader's mean-shift dx channels.
+            dx_mu = self._dx_sum / self._dx_n
+            dx_var = np.maximum(self._dx_sumsq / self._dx_n - dx_mu ** 2, 0.0)
+            payload["dx_mean"] = dx_mu.astype(np.float32)
+            payload["dx_std"] = np.sqrt(dx_var).astype(np.float32)
         if include_projector:
             payload["Omega"] = self.Omega.astype(np.float32)
             payload["phase"] = self.phase.astype(np.float32)
@@ -2039,6 +2082,46 @@ class HologramCrystalLoader:
                 self.high_band_ratio = 0.26
         else:
             self.high_band_ratio = 0.26
+
+        # 2026-11-13 (hunt finding U): an auto-band crystal persists the band
+        # fraction it ACTUALLY allocated. The slice/heal quota follows the
+        # effective ratio, not the constructor's raw one (measured: raw 0.26
+        # gave a 78-medoid quota for a band the lattice built at 30).
+        self.auto_band_ratio = False
+        if "auto_band_ratio" in data:
+            self.auto_band_ratio = bool(np.asarray(data["auto_band_ratio"]).reshape(-1)[0])
+        if self.auto_band_ratio and "effective_band_ratio" in data:
+            ebr = float(np.asarray(data["effective_band_ratio"]).reshape(-1)[0])
+            if 0.0 <= ebr <= 1.0:
+                self.high_band_ratio = ebr
+            else:
+                warnings.warn(
+                    f"artifact stores effective_band_ratio={ebr} outside [0, 1]; "
+                    "keeping the raw high_band_ratio -- re-save with a current "
+                    "shd build",
+                    UserWarning, stacklevel=2,
+                )
+
+        # 2026-11-13 (hunt finding Y): true temporal dx statistics, when the
+        # artifact carries them. The mean-shift term z-scores the dx channels
+        # against these instead of differences of count-ordered medoids.
+        self.dx_mean_ = None
+        self.dx_std_ = None
+        if self.include_deltas and "dx_mean" in data and "dx_std" in data:
+            d_raw = len(self.X_mean) // 2
+            dxm = np.asarray(data["dx_mean"], dtype=np.float64).reshape(-1)
+            dxs = np.asarray(data["dx_std"], dtype=np.float64).reshape(-1)
+            if (dxm.shape == (d_raw,) and dxs.shape == (d_raw,)
+                    and np.isfinite(dxm).all() and np.isfinite(dxs).all()
+                    and bool((dxs >= 0).all())):
+                self.dx_mean_ = dxm
+                self.dx_std_ = dxs
+            else:
+                warnings.warn(
+                    "artifact dx_mean/dx_std are inconsistent with the feature "
+                    "width; falling back to the medoid-cloud dx scale",
+                    UserWarning, stacklevel=2,
+                )
 
         # v3.15.2: the operating point travels with the artifact when the
         # file carries it. Legacy artifacts predate the field -> None
@@ -2585,6 +2668,14 @@ class HologramCrystalLoader:
             ref = self.X
         mu = ref.mean(axis=0)
         sd = ref.std(axis=0)
+        if self.include_deltas and self.dx_mean_ is not None:
+            # Finding Y: the dx half of the reference uses the stream's TRUE
+            # temporal difference statistics (persisted at distillation), not
+            # differences of count-ordered medoids. The raw half keeps the
+            # medoid cloud, which spans the learn window and moves with heal.
+            d_raw = len(self.X_mean) // 2
+            mu = np.concatenate([mu[:d_raw], self.dx_mean_])
+            sd = np.concatenate([sd[:d_raw], self.dx_std_])
         ok = sd > 1e-9
         z = np.abs(X_eff.mean(axis=0) - mu) / np.where(ok, sd, 1.0)
         val = float(z[ok].max()) if ok.any() else 0.0
@@ -2649,10 +2740,11 @@ class HologramCrystalLoader:
         # concurrent heal cannot rebind X/y/weights mid-read. RLock re-entry
         # keeps locked callers from deadlocking on the helpers below.
         # v3.14.4: e-process. When ``e_process=True`` the panel verdict is
-        # the anytime-valid e-value average (E_t / t > 1/alpha) rather than
+        # the running e-value-inspired average (E_t / t > 1/alpha) rather than
         # the fixed quantile; the state lives on the loader so a deployment
         # can alarm on the next window after several healthy ones without
-        # re-calibration.
+        # re-calibration. NOTE (2026-11-13): heuristic sequential alarm, not
+        # a certified anytime-valid e-process -- see _e_process_alarm.
         # Capture the continuity state BEFORE _bw_distance runs: the BW pass
         # advances self._prev_row to this window's last row, so the mean-shift
         # term (evaluated afterwards in the same call) must use this snapshot
@@ -3177,11 +3269,11 @@ class HologramCrystalLoader:
         picks it up automatically and ``panel_is_shifted`` then reflects the
         panel score.
         """
-        # v3.14.4: e-process option. When ``e_process=True`` the alarm is
-        # anytime-valid: the panel score is compared against an e-value
-        # average (E_t / t) instead of a fixed quantile, so the threshold
-        # grows with evidence rather than burning a fixed false-alarm budget
-        # on the first window. The state is kept on the loader
+        # v3.14.4: e-process option. When ``e_process=True`` the alarm is a
+        # sequential e-value-INSPIRED heuristic (2026-11-13: not a certified
+        # anytime-valid e-process -- see _e_process_alarm): the panel score
+        # is compared against an evidence average (E_t / t) instead of a
+        # fixed quantile. The state is kept on the loader
         # (``_e_value`` / ``_e_t``), reset by ``reset_e_process()`` and by
         # ``heal_domain_shift`` (same invalidation as the quantile taus).
         # Default False keeps the existing behaviour bit-identical.
@@ -3237,7 +3329,7 @@ class HologramCrystalLoader:
         }
 
     def reset_e_process(self) -> None:
-        """Reset the anytime-valid e-process evidence (v3.14.4).
+        """Reset the sequential-alarm evidence (v3.14.4).
 
         Clears ``_e_value`` / ``_e_t`` so the next ``check_domain_shift``
         starts a fresh e-value sequence. ``heal_domain_shift`` calls this
@@ -3247,15 +3339,23 @@ class HologramCrystalLoader:
         self._e_t = 0
 
     def _e_process_alarm(self, panel_distance: float) -> dict:
-        """Anytime-valid e-process verdict for one panel score (v3.14.4).
+        """Sequential e-value-INSPIRED alarm for one panel score (v3.14.4).
 
-        Maintains an e-value sequence: each window multiplies its e-value by
-        ``exp(panel_distance / tau - 1)`` (tau = calibrated quantile),
-        clamped so a single window cannot create infinite evidence. The
-        alarm fires when the running average ``E_t / t`` exceeds ``1/alpha``
-        (``alpha = fa_rate``). Under the null the e-value is a martingale,
-        so the anytime-valid threshold holds without re-calibration per
-        window. Returns ``{"e_value", "e_t", "e_average", "e_alarm"}``.
+        Maintains a running evidence product: each window multiplies it by
+        ``exp(panel_distance / tau - 1)`` (tau = calibrated quantile), clamped
+        so a single window cannot create infinite evidence. The alarm fires
+        when the running average ``E_t / t`` exceeds ``1/alpha``
+        (``alpha = fa_rate``).
+
+        HONESTY NOTE (2026-11-13 hunt finding LL): this is a HEURISTIC
+        sequential alarm, NOT a certified anytime-valid e-process. The
+        evidence starts at E_0 = tau (not 1), the exponential increment is
+        not proven to satisfy E[incr] <= 1 under the null, and the E_t / t
+        rule is not Ville's inequality. The earlier "anytime-valid
+        martingale" wording overclaimed; no published artifact relies on
+        this path. A properly calibrated e-process (e.g. conformal
+        p-to-e calibrator on the panel's null distances) is future work.
+        Returns ``{"e_value", "e_t", "e_average", "e_alarm"}``.
         """
         tau = float(self.panel_tau_calibrated) if self.panel_tau_calibrated is not None else float(BW_ALERT_THRESHOLD)
         alpha = float(self.panel_tau_fa_rate) if self.panel_tau_fa_rate is not None else 0.01

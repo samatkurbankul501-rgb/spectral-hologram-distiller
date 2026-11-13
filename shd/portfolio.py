@@ -265,6 +265,9 @@ class CoresetPortfolio:
         Z = self.scaler_.transform(X)
         p_c = self.krr_crit_.predict(Z)
         p_g = self.krr_glob_.predict(Z)
+        return self._gate_weights_from_predictions(p_c, p_g, Z)
+
+    def _gate_weights_from_predictions(self, p_c, p_g, Z) -> np.ndarray:
         D = self._gate_design(p_c, p_g, Z)
         w = self.gate_.predict_proba(D)[:, 1]
         # Alarm priority: the critical expert own prediction AT or ABOVE
@@ -279,8 +282,7 @@ class CoresetPortfolio:
                 alarm,
                 (p_c >= self.critical_threshold - self.emergency_band_).astype(float),
             )
-        w = np.maximum(w, alarm)
-        return w
+        return np.maximum(w, alarm)
 
     def expert_predictions(self, X_new: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Return ``(p_crit, p_glob)`` -- each expert's own KRR prediction."""
@@ -298,10 +300,21 @@ class CoresetPortfolio:
         """Soft-gated prediction ``w*p_crit + (1-w)*p_glob``.
 
         The gate reads both experts' KRR predictions (one matrix product
-        each) plus the |gap| feature.
+        each) plus the |gap| feature. The two predictions are computed ONCE
+        and shared with the gate (2026-11-13: predict() used to call both
+        expert_predictions() and gate_weights(), doubling the KRR work).
         """
-        p_c, p_g = self.expert_predictions(X_new)
-        w = self.gate_weights(X_new)
+        if not self._fitted:
+            raise RuntimeError("fit() must run before predict()")
+        X = np.asarray(X_new, dtype=np.float64)
+        if X.ndim != 2 or X.shape[1] != self.d_feat_:
+            raise ValueError(
+                f"expected a (n, {self.d_feat_}) matrix, got shape {X.shape}"
+            )
+        Z = self.scaler_.transform(X)
+        p_c = self.krr_crit_.predict(Z)
+        p_g = self.krr_glob_.predict(Z)
+        w = self._gate_weights_from_predictions(p_c, p_g, Z)
         return w * p_c + (1.0 - w) * p_g
 
 

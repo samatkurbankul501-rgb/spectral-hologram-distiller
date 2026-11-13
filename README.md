@@ -1,5 +1,24 @@
 # Spectral Hologram Distiller (SHD v3.15.2)
 
+> **2026-11-13 Banner hunt (confirmed, shipped):** a full-codebase bug hunt
+> (probe-first, one regression per defect) found three defects and one waste:
+> (U) auto-band crystals persisted the RAW high_band_ratio, so the loader's
+> slice/heal quota disagreed with the band the lattice built (measured: quota
+> 78 for a 30-medoid band); the effective ratio now travels with the artifact
+> (optional keys, legacy fallback). (Y) delta-crystal mean-shift z-scored the
+> dx channels against differences of COUNT-ORDERED medoids, inflating the dx
+> scale 4.3-5.2x on autocorrelated telemetry and desensitizing the trend alarm
+> 3.35x (measured 0.291 vs 0.973); true temporal dx statistics are now
+> accumulated during streaming and persisted (optional keys, legacy fallback;
+> restored 0.979). (LL) the panel e-process was documented as "anytime-valid"
+> but E_0=tau, the increment is not a certified e-value and E_t/t is not Ville:
+> the wording is corrected to a heuristic sequential alarm (behaviour unchanged;
+> no published artifact uses this path). (EE) CoresetPortfolio.predict computed
+> each KRR prediction twice; predictions are now shared with the gate
+> (bit-identical, measured 1.96x faster on 20k rows). The distiller's default
+> path is untouched (golden suite green). Regressions:
+> tests/test_bughunt_2026_11_13.py (9 tests). Suite 261 -> 270, gate 530.
+
 > **2026-11-13 correctness wave (confirmed, shipped):** two benchmark-level
 > correctness fixes that change published numbers, each regenerated from
 > scratch (20 seeds, paired Wilcoxon). (1) **C-MAPSS RUL convention**: train
@@ -123,7 +142,8 @@
 > high_band_ratio / phase_kappa tradeoff benches were added.
 > **v3.14.4 (2026-11-04): thread-safe radar, e-process alarm, larger panel.**
 > Loader read/mutate paths share a re-entrant lock so concurrent radar/heal calls
-> serialize; an opt-in e-process gives an anytime-valid panel verdict; the panel
+> serialize; an opt-in e-value-inspired sequential alarm (heuristic -- see the
+> 2026-11-13 Banner-hunt note); the panel
 > grew from 4 to 8 terms (autocorr lag-2, rank-DFS Spearman). Defaults bit-identical.
 > **v3.14.3 (2026-11-04): panel radar + global guard.** A fused panel score
 > (BW + mean-shift + MMD + energy) with `calibrate_threshold_panel`;
