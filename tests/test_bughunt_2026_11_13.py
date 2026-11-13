@@ -65,6 +65,35 @@ def test_U_effective_band_ratio_persisted():
         assert len(yp) <= quota
 
 
+def test_U_degenerate_band_uses_actual_centre_count():
+    # Critical rows fewer than the band budget: seeding returns fewer
+    # centres than requested; the persisted ratio must follow the ACTUAL
+    # allocated band, not the requested m_high (audit catch: 0.1095 vs
+    # 0.0109). Stream < warm-up target so the lattice builds at finalize
+    # with no online updates: final occupancy == allocated band exactly.
+    rng = np.random.default_rng(7)
+    X = rng.normal(size=(4000, 4))
+    y = X[:, 0] + 0.3 * rng.normal(size=4000)
+    crit = float(np.percentile(y, 99.9))
+    d = SpectralHologramDistiller(crystal_size=300, critical_threshold=crit,
+                                  auto_band_ratio=True, random_state=42)
+    for i in range(0, 4000, 2000):
+        d.partial_fit(X[i:i + 2000], y[i:i + 2000])
+    d.finalize_crystal()
+    n_high = int(np.sum(d.crystal_Y >= crit))
+    m_crystal = len(d.crystal_Y)
+    actual = n_high / m_crystal
+    assert d._effective_band_ratio < 0.05  # requested band was 0.10
+    # The ratio records the ALLOCATED band (high centres / total centres);
+    # Lloyd + snapping can move one band medoid below the threshold, so the
+    # final occupancy may differ by ~1 medoid. The pre-fix code stored the
+    # REQUESTED m_high (0.1095 here, ~0.098 away) -- far outside this tolerance.
+    assert abs(d._effective_band_ratio - actual) <= 1.5 / m_crystal
+    with tempfile.TemporaryDirectory() as td:
+        ld, _ = _load(d, td)
+        assert ld.high_band_ratio == pytest.approx(d._effective_band_ratio, abs=1e-9)
+
+
 def test_U_plain_crystal_quota_unchanged():
     rng = np.random.default_rng(3)
     X = rng.normal(size=(5000, 4))

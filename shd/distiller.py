@@ -650,8 +650,11 @@ class SpectralHologramDistiller:
         M_total = len(centers_ZY)
         # Record the band fraction actually allocated (finding U): with
         # auto_band_ratio this differs from the constructor's raw ratio, and
-        # the loader must protect/serve THIS band, not the raw one.
-        self._effective_band_ratio = (m_high / M_total) if M_total else float(self.high_band_ratio)
+        # the loader must protect/serve THIS band, not the raw one. Use the
+        # ACTUAL high-centre count: seeding returns fewer centres than the
+        # budget when the band has fewer candidate rows (degenerate rare
+        # regime), and the requested m_high would overstate the band.
+        self._effective_band_ratio = (len(c_high) / M_total) if M_total else float(self.high_band_ratio)
 
         # 2. Lloyd relaxation on the phase manifold.
         for _ in range(4):

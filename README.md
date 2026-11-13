@@ -17,7 +17,7 @@
 > each KRR prediction twice; predictions are now shared with the gate
 > (bit-identical, measured 1.96x faster on 20k rows). The distiller's default
 > path is untouched (golden suite green). Regressions:
-> tests/test_bughunt_2026_11_13.py (9 tests). Suite 261 -> 270, gate 530.
+> tests/test_bughunt_2026_11_13.py (10 tests). Suite 261 -> 271, gate 530.
 
 > **2026-11-13 correctness wave (confirmed, shipped):** two benchmark-level
 > correctness fixes that change published numbers, each regenerated from
