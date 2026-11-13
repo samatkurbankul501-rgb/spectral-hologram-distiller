@@ -17,6 +17,7 @@ import argparse
 import csv
 import io
 import json
+import os
 import time
 import urllib.request
 
@@ -39,8 +40,16 @@ URL = ("https://archive.ics.uci.edu/ml/machine-learning-databases/00381/"
 
 
 def load_pm25():
-    with urllib.request.urlopen(URL, timeout=60) as r:
-        text = r.read().decode("utf-8", "replace")
+    # Full UCI CSV committed under data/ so regens run offline; the truncated
+    # data/pm25.csv cache belongs to bench_passport_reference and is NOT this file.
+    local = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "data", "pm25_full.csv")
+    if os.path.exists(local):
+        with open(local, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    else:
+        with urllib.request.urlopen(URL, timeout=60) as r:
+            text = r.read().decode("utf-8", "replace")
     rows = list(csv.reader(io.StringIO(text)))
     header = rows[0]
     cbwd_values = ["NW", "NE", "SE", "cv"]

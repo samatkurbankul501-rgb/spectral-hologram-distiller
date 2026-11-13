@@ -1,5 +1,30 @@
 # Spectral Hologram Distiller (SHD v3.15.2)
 
+> **2026-11-13 correctness wave (confirmed, shipped):** two benchmark-level
+> correctness fixes that change published numbers, each regenerated from
+> scratch (20 seeds, paired Wilcoxon). (1) **C-MAPSS RUL convention**: train
+> labels used `life−cyc+1` while the official test labels use `life−cyc`;
+> both now share the official convention. The KRR oracle improved more than
+> the coresets (13.57 → 13.05 K): the "SHDU beats the KRR oracle by median"
+> claim is RETRACTED (no arm beats it; the best is br=0.50 uniform, 7/20),
+> br=0.65 KRR now ties K-Means, and the GBM full-pool oracle is still beaten
+> (16–19/20). §10 rewritten from the regenerated artifact. (2) **Portfolio
+> critical-aware expert**: `bench_portfolio.py` built its "critical" expert
+> with a plain percentile band, contradicting the `CoresetPortfolio`
+> docstring; it now passes `critical_threshold` + `auto_band_ratio=True`.
+> The SHD-C arm itself improves (SC crit 18.81 → 18.39, PM2.5 crit
+> 231.0 → 216.6, reactor crit 3.44 → 3.04); the portfolio keeps its global
+> wins (SC p=0.027, PM2.5 p=1.9e-6) and is still NOT Pareto-best (reactor
+> crit worse, p=3.8e-6). Also shipped: the full UCI PM2.5 CSV is committed
+> (`data/pm25_full.csv`, 41,757 parsed rows) so PM2.5 regens run offline;
+> the truncated `data/pm25.csv` cache stays untouched for
+> `bench_passport_reference`. Package-level hygiene: the MMD docstring now
+> says biased V-statistic (was "unbiased"), a redundant k-NN recomputation
+> was removed from `ConformalCrystal.predict_interval` (bit-identical), and
+> a dangling notebook reference was dropped. The distiller's published
+> default path is untouched; the headline §1–2 artifacts are unchanged.
+> Gate 521 → 530, suite 261.
+
 > **2026-11-11 metric-growth follow-up (confirmed, shipped):** two correctness
 > fixes that raise real metrics without touching the published default path.
 > (1) **`finalize_crystal()` rebuilds the lattice from the reservoir** when
@@ -154,25 +179,27 @@
 > — alarm priority over economy. Twenty-seed three-dataset benchmark
 > (`bench_portfolio.py`, Wilcoxon signed-rank, equal m=300 arms; the
 > portfolio holds 300+300 — a second expert is bought with cores, not with
-> new data). **Re-measured from scratch on 2026-11-07 (20 seeds x 3 datasets)
-> after the gate column-convention fix; the pre-fix numbers are superseded.**
+> new data). **Re-measured from scratch on 2026-11-13 (20 seeds x 3 datasets)
+> after the critical-aware expert fix (the critical coreset is now built with
+> `critical_threshold` + `auto_band_ratio=True`, as the portfolio docstring
+> always promised); the 2026-11-07 numbers are superseded.**
 > Every number below is KRR: the portfolio's GBM column duplicates the SHD arm
 > by construction (both fit the same critical coreset with the same seed), so
 > it is not an independent portfolio measurement and the Wilcoxon table is
-> KRR-only. **SC** — crit **18.32** vs 18.81 SHD-C (p=0.064, NOT significant
-> — a tie), 23.26 KT / 21.19 SKT / 19.57 hard-gate (all p<1e-4); global
-> **15.38** vs 15.42 SHD-C (p=0.030), ahead of KT / SKT / hard-gate.
-> **PM2.5** — global **87.08** vs 95.08 SHD-C (p=3.8e-6) and 89.89 KT
-> (p=1.3e-5), but SKT (86.53) is NOT beaten (p=0.596, n.s.); crit **228.31**
-> vs 231.01 SHD-C is a tie (p=0.571) while beating SKT (246.02, p=0.0014).
-> **reactor** — the portfolio is WORSE than SHD-C on both axes (crit 3.65 vs
-> 3.44, p=9.5e-6; global 0.994 vs 0.976, p=0.0037), though still ahead of
-> KT / SKT / hard-gate (p<1e-4). Net after the fix: one clear global win
-> (PM2.5 global), a tie on SC and a small loss on reactor — the portfolio is
-> NOT a Pareto-best arm.
+> KRR-only. **SC** — crit **18.22** vs 18.39 SHD-C (p=0.349, NOT significant
+> — a tie), 23.26 KT / 21.19 SKT / 19.22 hard-gate (all p<1e-4); global
+> **15.38** vs 15.46 SHD-C (p=0.027), ahead of KT / SKT / hard-gate.
+> **PM2.5** — global **86.63** vs 101.15 SHD-C (p=1.9e-6) and 89.89 KT
+> (p=6.4e-3), but SKT (86.53) is NOT beaten (p=0.475, n.s.); crit **224.67**
+> vs 216.57 SHD-C is a tie (p=0.648) while beating SKT (246.02, p=9.5e-6).
+> **reactor** — the portfolio is WORSE than SHD-C on crit (crit 3.32 vs
+> 3.04, p=3.8e-6) and a tie on global (0.975 vs 0.969, p=0.70), though still
+> ahead of KT / SKT / hard-gate (p<1e-4). Net after the fix: global wins on
+> SC and PM2.5, crit ties on SC/PM2.5, a crit loss on reactor — the portfolio
+> is still NOT a Pareto-best arm.
 > The hard threshold gate (`bench_moe_kt.py` routing) LOSES to the soft OOF
-> stacker on every dataset (SC 19.57, PM2.5 238.36/90.63, reactor
-> 4.20/1.12): the gate must read both experts' predictions, not a threshold.
+> stacker on every dataset (SC 19.22, PM2.5 237.15/90.31, reactor
+> 4.06/1.11): the gate must read both experts' predictions, not a threshold.
 > The portfolio is opt-in — on a single-domain stream with a trusted
 > critical expert, SHD-C alone is the cheaper deployment.
 > (2) **`ConformalCrystal`** — split-conformal intervals around any fitted
@@ -1112,81 +1139,93 @@ critical regime lives on the LOW side of the target. Data: pristine FD001
 (`data/cmapss/`, 20,631 train cycles over 100 run-to-failure engines; official
 test protocol = predict RUL at each of the 100 test engines' last cycle).
 Features: the standard 14-sensor FD001 recipe (s1, s5, s10, s16, s18, s19 are
-exactly constant, std = 0). Target: piecewise-linear RUL capped at 125; the
-critical regime is `y <= 25` cycles — the last 25 cycles before failure
-(12.1% of train rows, 19/100 test engines). SHD runs with `tail="low"` and
-the §6 operating-point sweep. Single source of truth:
-`bench_cmapss_results.json`.
+exactly constant, std = 0). Target: piecewise-linear RUL capped at 125,
+**RUL = life − cyc — the official convention of `RUL_FD001.txt`, shared by
+train and test labels**. A 2026-11-13 correctness fix removed a `+1` that had
+made train labels one cycle optimistic; every number below was regenerated
+from scratch under the corrected convention (20 seeds), and the pre-fix
+numbers are superseded. The critical regime is `y <= 25` cycles — the last
+cycles before failure (12.6% of train rows, 2,600 rows; 19/100 test engines).
+SHD runs with `tail="low"` and the §6 operating-point sweep. Single source of
+truth: `bench_cmapss_results.json`.
 
 **Critical regime (19 near-failure test engines, RMSE median over 20 seeds):**
 
-| Arm (M=300) | KRR RMSE crit | GBM RMSE crit | Rare captured (of 2500) |
+| Arm (M=300) | KRR RMSE crit | GBM RMSE crit | Rare captured (of 2600) |
 | :--- | :---: | :---: | :---: |
-| SHD br=0.26 (default), gamma weights | 14.94 | 16.13 | 58.0 |
-| SHD br=0.50, gamma weights | 15.51 | 15.42 | 107.5 |
-| SHD br=0.65, gamma weights | 14.52 | 14.01 | 138.5 |
-| **SHD br=0.65, uniform weights** | **13.45** | **12.74** | **138.5** |
-| Random | 18.05 | 19.77 | 36.5 |
-| K-Means | 16.06 | 17.93 | 53.5 |
-| Kernel Thinning | 17.52 | 18.14 | 34.5 |
-| Supervised KT | 16.60 | 17.98 | 36.0 |
-| Oracle (KRR@9,000 / GBM full pool) | 13.57 | 17.21 | — |
+| SHD br=0.26 (default), gamma weights | 16.08 | 16.17 | 58.0 |
+| SHD br=0.50, gamma weights | 13.60 | 14.73 | 109.5 |
+| SHD br=0.65, gamma weights | 14.54 | 13.61 | 140.5 |
+| **SHD br=0.65, uniform weights** | **13.81** | 13.95 | 140.5 |
+| Random | 17.63 | 19.07 | 37.5 |
+| K-Means | 15.46 | 16.15 | 54.5 |
+| Kernel Thinning | 17.05 | 17.40 | 37.5 |
+| Supervised KT | 15.38 | 16.97 | 38.0 |
+| Oracle (KRR@9,000 / GBM full pool) | 13.05 | 16.99 | — |
 
-At the critical preset `br=0.65` the crystal significantly beats **all four
-baselines on both models' critical RMSE** — KRR: vs Random 16/20
-($p=2.0\times10^{-3}$), vs K-Means 17/20 ($p=2.1\times10^{-2}$), vs KT 16/20
-($p=5.6\times10^{-3}$), vs SKT 17/20 ($p=2.7\times10^{-3}$); GBM: vs Random
-18/20 ($p=6.3\times10^{-5}$), vs K-Means 17/20 ($p=1.4\times10^{-2}$), vs KT
-18/20 ($p=3.2\times10^{-4}$), vs SKT 18/20 ($p=9.5\times10^{-6}$) — and holds
-138.5 of the 2,500 near-failure medoids (46% of the crystal vs the 12.1%
-population share, a 3.8× over-representation). The GBM crystal even beats the
-**full-pool GBM oracle** on the critical regime, 19/20 seeds (14.01 vs 17.21 K).
+At the critical preset `br=0.65` the gamma-weighted crystal beats **all four
+baselines on GBM critical RMSE** — vs Random 16/20 ($p=1.0\times10^{-3}$),
+vs K-Means 14/20 ($p=1.1\times10^{-2}$), vs KT 17/20 ($p=2.1\times10^{-4}$),
+vs SKT 13/20 ($p=6.4\times10^{-3}$) — and on KRR beats Random 16/20
+($p=3.7\times10^{-3}$), KT 14/20 ($p=2.7\times10^{-2}$) and SKT 12/20
+($p=2.7\times10^{-2}$; significant by Wilcoxon but a minority of seeds),
+while **K-Means is a KRR tie** (12/20, $p=0.43$, n.s.). It holds 140.5 of the
+2,600 near-failure rows (46.8% of the crystal vs the 12.6% population share,
+a 3.7× over-representation).
 
-**The uniform-weight arm is stronger still, and the table above used to hide it.**
-SHDU is the *same crystal* as `shd` — only the training weights differ (ones
-instead of the tempered Voronoi gamma weights), so it costs nothing to compute. At
-`br=0.65` it gives KRR crit **13.45 K** and GBM crit **12.74 K**: it beats every
-baseline on both models by a wider margin — KRR: vs Random 17/20
-($p=3.9\times10^{-4}$), vs K-Means 17/20 ($p=1.4\times10^{-2}$), vs KT 16/20
-($p=1.4\times10^{-3}$), vs SKT 17/20 ($p=1.7\times10^{-4}$); GBM: vs Random **20/20**
-($p=1.9\times10^{-6}$), vs K-Means 17/20 ($p=1.1\times10^{-2}$), vs KT 19/20
-($p=1.3\times10^{-5}$), vs SKT 18/20 ($p=3.6\times10^{-5}$) — and its GBM critical
-RMSE sits **4.5 K below the full-pool GBM oracle** (12.74 vs 17.21).
+**The uniform-weight arm: better KRR, worse GBM.** SHDU is the *same crystal*
+as `shd` — only the training weights differ (ones instead of the tempered
+Voronoi gamma weights), so it costs nothing to compute. At `br=0.65` it gives
+KRR crit **13.81 K** (vs 14.54 gamma) but GBM crit **13.95 K** (vs 13.61
+gamma): under the corrected convention uniform no longer dominates on both
+models — the weighting choice is model-dependent here. KRR: vs Random 16/20
+($p=2.3\times10^{-3}$), vs KT 16/20 ($p=3.7\times10^{-3}$), vs SKT 14/20
+($p=8.3\times10^{-3}$), vs K-Means 12/20 ($p=0.22$, n.s.). GBM: vs Random
+18/20 ($p=4.8\times10^{-5}$), vs K-Means 13/20 ($p=1.4\times10^{-2}$), vs KT
+17/20 ($p=1.3\times10^{-4}$), vs SKT 16/20 ($p=2.7\times10^{-3}$).
 
 **Honest costs and negatives, same artifact:**
 
-- The `br=0.65` global price on FD001 is real, not noise: KRR-all 21.40 K is
-  significantly worse than Random/KT/SKT (best baseline 19.62 K, several
-  $p < 0.05$) — steeper than the +4.5% cost on superconductivity. The
-  capped-RUL target puts 39.9% of training rows on a single mass point
-  (y = 125), so every band cell costs more background coverage than on
-  SC/reactor.
-- The KRR oracle is beaten **only** by the uniform-weight arm and **only** on the
-  critical regime: `shdu` at `br=0.65` has median 13.45 K against the
-  oracle's 13.57 K (10/20 per-seed wins), while the gamma-weighted arm does not (8/20). On
-  global KRR **every** arm is 0/20 against the oracle. The oracle-beating regime
-  of §6 therefore does not transfer automatically — it is a property of a
-  dataset's tail geometry *and* of the weighting, which is why this section
-  reports baseline wins and oracle wins separately.
-- **Weighting is a deployment decision, and the shipped default is not the best
-  one on a low tail.** The loader defaults to `weighting="gamma"`; on FD001 — a
-  *low*-tail dataset, i.e. the shape of a remaining-life problem — uniform weights
-  are better on the critical regime with the **identical crystal** (13.45 K vs
-  14.52 K KRR, 12.74 K vs 14.01 K GBM), and marginally better globally too
-  (21.14 K vs 21.40 K) although both still trail Random's 19.87 K. The rule for a
-  deployment: **near-failure accuracy → uniform weights; global accuracy → gamma
-  weights.** It is one flag on `loader.get_training_data(weighting=...)`; no new
-  crystal is needed, and the weights are a per-deployment choice, not a protocol
-  constant.
-- The default `br=0.26` is the milder operating point: KRR critical beats
-  Random (15/20, $p=2.0\times10^{-3}$) and KT (13/20, $p=1.9\times10^{-2}$),
-  ties K-Means/SKT, keeps global KRR competitive (19.56 K; beats K-Means 19/20,
-  $p=3.2\times10^{-4}$), and posts the best KRR PHM08 asymmetry score of all
-  arms (1092.7 vs 1287.9–1524.0; significant vs Random/KT/SKT).
+- **The KRR oracle is NOT beaten by any arm.** The corrected convention
+  improved the oracle (13.57 → 13.05 K) more than the coresets: the best
+  median is `shdu` at `br=0.50` (13.45 K, 7/20 per-seed wins). The earlier
+  "beats the KRR oracle by median" claim was an artifact of the train/test
+  label mismatch and is retracted. On global KRR every arm is 0/20 against
+  the oracle. The oracle-beating regime of §6 therefore does not transfer
+  automatically — it is a property of a dataset's tail geometry *and* of the
+  weighting, which is why this section reports baseline wins and oracle wins
+  separately.
+- **The GBM full-pool oracle IS beaten on the critical regime**: `br=0.50`
+  gamma 19/20 (14.73 vs 16.99), `br=0.65` uniform 18/20 (13.95 vs 16.99),
+  `br=0.65` gamma 16/20 (13.61 vs 16.99).
+- The `br=0.65` global price on FD001 is real, not noise: KRR-all 21.38 K is
+  significantly worse than SKT (19.57 K, 3/20, $p=2.6\times10^{-4}$) and KT
+  (19.92 K, 7/20, $p=4.4\times10^{-2}$), and a tie with K-Means (21.42 K,
+  12/20, n.s.). The capped-RUL target puts 39.4% of training rows on a single
+  mass point (y = 125), so every band cell costs more background coverage
+  than on SC/reactor.
+- **br=0.50 is the KRR-best operating point** (13.60 gamma / 13.45 uniform),
+  not br=0.65: the band-ratio optimum is metric- and model-dependent.
+- **Weighting is a deployment decision, and the shipped default is not the
+  best one on a low tail.** The loader defaults to `weighting="gamma"`; on
+  FD001 — a *low*-tail dataset, i.e. the shape of a remaining-life problem —
+  near-failure KRR prefers uniform weights with the **identical crystal**
+  (13.81 K vs 14.54 K at br=0.65) while near-failure GBM at the same preset
+  prefers gamma (13.61 K vs 13.95 K). The rule for a deployment:
+  **near-failure KRR → uniform weights; near-failure GBM at br=0.65 → gamma
+  weights; global accuracy → gamma weights.** It is one flag on
+  `loader.get_training_data(weighting=...)`; no new crystal is needed, and
+  the weights are a per-deployment choice, not a protocol constant.
+- The default `br=0.26` is the milder operating point: under the corrected
+  convention its critical KRR wins over Random/KT are no longer significant
+  (14/20, $p=0.11$; 12/20, $p=0.50$), but it keeps global KRR competitive
+  (19.65 K; beats K-Means 17/20, $p=4.8\times10^{-5}$) and posts the best
+  KRR PHM08 asymmetry score of the coreset arms (1012.0 vs 1228.7–1459.9;
+  not significant at 20 seeds).
 
 The §6 lesson repeats on a third real dataset: the band ratio is a deployment
-preset — `br=0.65` when near-failure accuracy is what you pay for, `br=0.26`
-when global fit still matters.
+preset — `br=0.65` when GBM near-failure accuracy is what you pay for,
+`br=0.50` for KRR, `br=0.26` when global fit still matters.
 
 ## Known limitations
 

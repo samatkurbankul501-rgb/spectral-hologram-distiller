@@ -588,9 +588,6 @@ class ConformalCrystal:
         else:
             half = np.full(len(pred), q)
 
-        knn_q = cdist(Z, self._Z_train_)
-        k = min(self.k, self.knn_d_train_.shape[0])
-        knn_q = np.partition(knn_q, k - 1, axis=1)[:, :k].mean(axis=1)
         if self.adaptive and self.mondrian != "alarm_zone":
             half = half * np.maximum(knn_q, 1e-12)
         if self.mondrian == "alarm_zone":

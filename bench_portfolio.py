@@ -1,7 +1,9 @@
 """Equal-budget portfolio benchmark: SHD-C vs KT vs SKT vs CoresetPortfolio.
 
 Arms per seed (KRR head unless noted):
-- shd:        SHD-C critical crystal, m=300 (the distiller's own coreset);
+- shd:        SHD-C critical crystal, m=300 -- critical_threshold=crit with
+              auto_band_ratio=True, the critical-aware distiller the
+              CoresetPortfolio docstring promises;
 - kt:         unsupervised Kernel Thinning (JMLR 2024), m=300;
 - skt:        supervised Kernel Thinning (NeurIPS 2024), m=300;
 - portfolio:  CoresetPortfolio on SHD-C(seed) + KT(seed+5000), 300+300;
@@ -35,7 +37,7 @@ from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 
 from bench_pm25 import load_pm25
-from bench_seeds import build_kt, build_shd, build_skt, load_reactor, load_superconduct
+from bench_seeds import build_kt, build_skt, load_reactor, load_superconduct
 from shd import CoresetPortfolio, SpectralHologramDistiller
 from sklearn.model_selection import train_test_split
 
@@ -59,6 +61,22 @@ def load_data(name):
         X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.20, random_state=42)
         crit = float(crit)
     return X_tr, y_tr, X_te, y_te, crit, title
+
+
+def build_shd_critical(X_tr, y_tr, seed, m, batch, crit):
+    # The critical expert must be built with the SAME threshold the portfolio
+    # gate uses; a plain percentile-band crystal contradicted the docstring
+    # and diluted the critical regime (measured on reactor, 2026-11-11).
+    d = SpectralHologramDistiller(
+        crystal_size=m, high_band_ratio=0.26, sketch_dim=256,
+        tail_quantile=84.0, phase_kappa=3.2, random_state=seed,
+        critical_threshold=crit, auto_band_ratio=True,
+    )
+    for i in range(0, len(X_tr), batch):
+        d.partial_fit(X_tr[i : i + batch], y_tr[i : i + batch])
+    d.finalize_crystal()
+    n_rare = int(np.sum(d.crystal_Y >= crit))
+    return d.crystal_X, np.asarray(d.crystal_Y, dtype=np.float64), d.gamma_weights, n_rare
 
 
 def _krr_gbm(Xc, yc, wc, scaler, gamma, d_feat, X_te, Z_te, y_te, crit_mask, model_seed):
@@ -110,7 +128,7 @@ def run(dataset, seeds, checkpoint_path):
         t_s = time.perf_counter()
         rec = {"seed": int(seed)}
 
-        Xs, ys, ws, n_rare = build_shd(X_tr, y_tr, seed, M, BATCH, crit)
+        Xs, ys, ws, n_rare = build_shd_critical(X_tr, y_tr, seed, M, BATCH, crit)
         rec["shd"] = _krr_gbm(Xs, ys, ws, scaler, gamma, d_feat,
                               X_te, scaler.transform(X_te), y_te,
                               crit_mask, 42)

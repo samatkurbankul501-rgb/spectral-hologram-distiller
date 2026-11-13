@@ -344,62 +344,69 @@ check("frontier reactor br065 beats oracle krr wins",
       frc["vs_oracle"]["shd_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 20, 0)
 
 # ------------------------------------------- C-MAPSS FD001 (bench_cmapss.py)
+# Regenerated 2026-11-13 under the official RUL convention (life - cyc):
+# the +1 train-label offset is gone; train and test share one convention.
 cm = load("bench_cmapss_results.json")["results"]["fd001"]
 check("cmapss complete", 0 if cm.get("partial") else 1, 1, 0)
 check("cmapss seed count", len(cm["records"]), 20, 0)
-check("cmapss oracle krr crit", cm["oracle"]["krr_rmse_crit"], 13.574, 0.0005)
-check("cmapss oracle gbm full crit", cm["oracle"]["gbm_full_pool"]["gbm_rmse_crit"], 17.208, 0.0005)
+check("cmapss oracle krr crit", cm["oracle"]["krr_rmse_crit"], 13.0509, 0.0005)
+check("cmapss oracle gbm full crit", cm["oracle"]["gbm_full_pool"]["gbm_rmse_crit"], 16.9903, 0.0005)
 check("cmapss br065 krr_crit median",
-      cm["wilcoxon"]["shd_r0.65_vs_kt_krr_rmse_crit"]["median_shd"], 14.525, 0.0005)
+      cm["wilcoxon"]["shd_r0.65_vs_kt_krr_rmse_crit"]["median_shd"], 14.5387, 0.0005)
 check("cmapss br065 krr_crit wins vs kt",
-      cm["wilcoxon"]["shd_r0.65_vs_kt_krr_rmse_crit"]["wins_shd"], 16, 0)
+      cm["wilcoxon"]["shd_r0.65_vs_kt_krr_rmse_crit"]["wins_shd"], 14, 0)
 check("cmapss br065 krr_crit wins vs kmeans",
-      cm["wilcoxon"]["shd_r0.65_vs_kmeans_krr_rmse_crit"]["wins_shd"], 17, 0)
-check("cmapss br065 krr_crit p<0.01 vs kt",
-      1 if cm["wilcoxon"]["shd_r0.65_vs_kt_krr_rmse_crit"]["p_value"] < 0.01 else 0, 1, 0)
+      cm["wilcoxon"]["shd_r0.65_vs_kmeans_krr_rmse_crit"]["wins_shd"], 12, 0)
+check("cmapss br065 krr_crit p<0.05 vs kt",
+      1 if cm["wilcoxon"]["shd_r0.65_vs_kt_krr_rmse_crit"]["p_value"] < 0.05 else 0, 1, 0)
+check("cmapss br065 krr vs kmeans is a tie (n.s.)",
+      1 if cm["wilcoxon"]["shd_r0.65_vs_kmeans_krr_rmse_crit"]["p_value"] > 0.05 else 0, 1, 0)
 check("cmapss br065 gbm_crit wins vs kt",
-      cm["wilcoxon"]["shd_r0.65_vs_kt_gbm_rmse_crit"]["wins_shd"], 18, 0)
+      cm["wilcoxon"]["shd_r0.65_vs_kt_gbm_rmse_crit"]["wins_shd"], 17, 0)
 check("cmapss br065 gbm_crit wins vs skt",
-      cm["wilcoxon"]["shd_r0.65_vs_skt_gbm_rmse_crit"]["wins_shd"], 18, 0)
+      cm["wilcoxon"]["shd_r0.65_vs_skt_gbm_rmse_crit"]["wins_shd"], 13, 0)
 check("cmapss br065 gbm beats full-pool oracle at crit",
-      cm["vs_oracle"]["shd_r0.65"]["gbm_rmse_crit"]["wins_vs_oracle"], 19, 0)
+      cm["vs_oracle"]["shd_r0.65"]["gbm_rmse_crit"]["wins_vs_oracle"], 16, 0)
+check("cmapss br050 gbm beats full-pool oracle at crit (19/20)",
+      cm["vs_oracle"]["shd_r0.5"]["gbm_rmse_crit"]["wins_vs_oracle"], 19, 0)
 check("cmapss br065 gamma arm krr oracle NOT beaten (honest negative)",
-      cm["vs_oracle"]["shd_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 8, 0)
+      cm["vs_oracle"]["shd_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 6, 0)
 # The uniform-weight arms (SHDU) are the SAME crystals with ones instead of
-# the gamma weights. On FD001 -- a LOW-tail dataset, i.e. the shape of a
-# remaining-life problem -- they dominate the gamma arms on the critical
-# regime and beat the KRR oracle by median. The README table omitted them
-# for a whole release; these pins exist so that omission cannot come back.
+# the gamma weights. Under the corrected convention they improve KRR critical
+# but NOT GBM critical at br=0.65 (model-dependent weighting), and NO arm
+# beats the KRR oracle -- the pre-fix oracle-beating claim is retracted.
 check("cmapss shdu r065 krr_crit median",
-      cm["wilcoxon"]["shdu_r0.65_vs_kt_krr_rmse_crit"]["median_shd"], 13.447, 0.0005)
+      cm["wilcoxon"]["shdu_r0.65_vs_kt_krr_rmse_crit"]["median_shd"], 13.8100, 0.0005)
 check("cmapss shdu r065 gbm_crit median",
-      cm["wilcoxon"]["shdu_r0.65_vs_kt_gbm_rmse_crit"]["median_shd"], 12.735, 0.0005)
+      cm["wilcoxon"]["shdu_r0.65_vs_kt_gbm_rmse_crit"]["median_shd"], 13.9486, 0.0005)
+check("cmapss shdu r050 krr_crit median (KRR-best point)",
+      cm["wilcoxon"]["shdu_r0.5_vs_kt_krr_rmse_crit"]["median_shd"], 13.4542, 0.0005)
 check("cmapss shdu r065 krr_crit wins vs random",
-      cm["wilcoxon"]["shdu_r0.65_vs_random_krr_rmse_crit"]["wins_shd"], 17, 0)
+      cm["wilcoxon"]["shdu_r0.65_vs_random_krr_rmse_crit"]["wins_shd"], 16, 0)
 check("cmapss shdu r065 krr_crit wins vs kmeans",
-      cm["wilcoxon"]["shdu_r0.65_vs_kmeans_krr_rmse_crit"]["wins_shd"], 17, 0)
-check("cmapss shdu r065 gbm_crit wins vs random (20/20)",
-      cm["wilcoxon"]["shdu_r0.65_vs_random_gbm_rmse_crit"]["wins_shd"], 20, 0)
+      cm["wilcoxon"]["shdu_r0.65_vs_kmeans_krr_rmse_crit"]["wins_shd"], 12, 0)
+check("cmapss shdu r065 gbm_crit wins vs random (18/20)",
+      cm["wilcoxon"]["shdu_r0.65_vs_random_gbm_rmse_crit"]["wins_shd"], 18, 0)
 check("cmapss shdu r065 gbm_crit wins vs kt",
-      cm["wilcoxon"]["shdu_r0.65_vs_kt_gbm_rmse_crit"]["wins_shd"], 19, 0)
-check("cmapss shdu r065 krr_crit p<0.001 vs random",
-      1 if cm["wilcoxon"]["shdu_r0.65_vs_random_krr_rmse_crit"]["p_value"] < 0.001 else 0, 1, 0)
-check("cmapss shdu r065 gbm_crit p<1e-5 vs random",
-      1 if cm["wilcoxon"]["shdu_r0.65_vs_random_gbm_rmse_crit"]["p_value"] < 1e-5 else 0, 1, 0)
-check("cmapss shdu r065 krr_crit beats oracle by median",
+      cm["wilcoxon"]["shdu_r0.65_vs_kt_gbm_rmse_crit"]["wins_shd"], 17, 0)
+check("cmapss shdu r065 krr_crit p<0.01 vs random",
+      1 if cm["wilcoxon"]["shdu_r0.65_vs_random_krr_rmse_crit"]["p_value"] < 0.01 else 0, 1, 0)
+check("cmapss shdu r065 gbm_crit p<1e-4 vs random",
+      1 if cm["wilcoxon"]["shdu_r0.65_vs_random_gbm_rmse_crit"]["p_value"] < 1e-4 else 0, 1, 0)
+check("cmapss shdu r065 krr_crit does NOT beat oracle by median (retracted)",
       1 if cm["vs_oracle"]["shdu_r0.65"]["krr_rmse_crit"]["median_shd"]
-             < cm["vs_oracle"]["shdu_r0.65"]["krr_rmse_crit"]["oracle"] else 0, 1, 0)
+             < cm["vs_oracle"]["shdu_r0.65"]["krr_rmse_crit"]["oracle"] else 0, 0, 0)
 check("cmapss shdu r065 krr_crit wins vs oracle",
-      cm["vs_oracle"]["shdu_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 10, 0)
+      cm["vs_oracle"]["shdu_r0.65"]["krr_rmse_crit"]["wins_vs_oracle"], 8, 0)
 check("cmapss shdu r065 gbm_crit wins vs oracle",
-      cm["vs_oracle"]["shdu_r0.65"]["gbm_rmse_crit"]["wins_vs_oracle"], 19, 0)
+      cm["vs_oracle"]["shdu_r0.65"]["gbm_rmse_crit"]["wins_vs_oracle"], 18, 0)
 check("cmapss no arm beats the oracle on global krr",
       1 if all(v["krr_rmse_all"]["wins_vs_oracle"] == 0
                for v in cm["vs_oracle"].values()) else 0, 1, 0)
 check("cmapss br065 rare median",
-      float(np.median([r["shd_r0.65"]["rare_captured"] for r in cm["records"]])), 138.5, 0.001)
+      float(np.median([r["shd_r0.65"]["rare_captured"] for r in cm["records"]])), 140.5, 0.001)
 check("cmapss kmeans krr_crit median",
-      cm["wilcoxon"]["shd_r0.65_vs_kmeans_krr_rmse_crit"]["median_kmeans"], 16.058, 0.0005)
+      cm["wilcoxon"]["shd_r0.65_vs_kmeans_krr_rmse_crit"]["median_kmeans"], 15.4556, 0.0005)
 
 # ---------------------------------------------------------------- paper strings
 PAPER_NEEDLE_COUNTS = {
@@ -481,19 +488,19 @@ README_NEEDLE_COUNTS = {
     '85.3': 1,
     '993.0': 3,
     'DomainBank': 8,
-    'PM2.5': 11,
+    'PM2.5': 16,
     'passport_recalibrate': 4,
     'weighting="uniform"': 2,
-    '13.45': 4,
-    '12.74': 4,
-    '14.52': 2,
+    '13.45': 2,
+    '13.81': 3,
+    '13.95': 4,
 }
 
 for text in [
     "# Spectral Hologram Distiller (SHD v3.15.2)",
     "### 10. NASA C-MAPSS FD001: remaining useful life on the LOW tail",
     "DomainBank", "passport_recalibrate", 'weighting="uniform"',
-    "13.45", "12.74", "14.52",
+    "13.45", "13.81", "13.95",
     # "196.0" lived in the paper only (PM2.5 guard KRR-crit); the README
     # carries the threshold and the Scania official-cost row instead.
     "59.0", "55.0", "PM2.5", "324", "85.3", "0.465", "993.0",
@@ -735,13 +742,15 @@ check_text_count("README SC crit row", "**18.81 / 0.93 K**", 1, README)
 check_text_count("README Scania official cost", "**18645.0**", 2, README)
 check_text_count("README edge artifact size", "28.9 KB artifact", 1, README)
 check_text_count("README edge 81D size", "184.9 KB", 1, README)
-check_text_count("README guard plain KRR", "101.15", 1, README)
+check_text_count("README guard plain KRR", "101.15", 2, README)
 check_text_count("README guard guarded KRR", "91.52", 2, README)
-check_text_count("README PM2.5 global KRR", "95.08", 1, README)
+check_text_count("README portfolio PM2.5 SHD-C global", "vs 101.15 SHD-C", 1, README)
+check_absent("README no pre-2026-11-13 portfolio SHD-C global", "95.08", README)
 
-# --------------------------------------- portfolio artifacts (2026-11-07)
+# --------------------------------------- portfolio artifacts (2026-11-13)
 # The portfolio arm was re-measured FROM SCRATCH (20 seeds, 3 datasets)
-# after the gate column-convention fix; the pre-fix artifact is superseded.
+# after the critical-aware expert fix (critical_threshold + auto_band_ratio);
+# the 2026-11-07 artifact is superseded.
 # The gate must pin the published values, not only the ordering: a stale or
 # doctored artifact must not pass.
 pf_sc = load("bench_portfolio_superconduct_results.json")
@@ -763,44 +772,44 @@ for _nm, _d in (("SC", pf_sc), ("PM2.5", pf_pm), ("reactor", pf_re)):
           abs(_d["summary"]["portfolio"]["gbm_rmse_crit"]
               - _d["summary"]["shd"]["gbm_rmse_crit"]), 0.0, 1e-9)
 
-check("portfolio SC crit", pf_sc["summary"]["portfolio"]["krr_rmse_crit"], 18.3217, 0.011)
-check("portfolio SC all", pf_sc["summary"]["portfolio"]["krr_rmse_all"], 15.3798, 0.011)
+check("portfolio SC crit", pf_sc["summary"]["portfolio"]["krr_rmse_crit"], 18.2158, 0.011)
+check("portfolio SC all", pf_sc["summary"]["portfolio"]["krr_rmse_all"], 15.3822, 0.011)
 check("portfolio SC p vs SHD-C crit",
-      pf_sc["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"], 0.0637, 0.001)
+      pf_sc["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"], 0.3488, 0.001)
 check("portfolio SC p vs SHD-C all",
-      pf_sc["wilcoxon"]["portfolio_vs_shd_krr_rmse_all"]["p"], 0.0296, 0.001)
+      pf_sc["wilcoxon"]["portfolio_vs_shd_krr_rmse_all"]["p"], 0.0266, 0.001)
 check("portfolio SC p vs KT crit",
       pf_sc["wilcoxon"]["portfolio_vs_kt_krr_rmse_crit"]["p"], 1.9073486328125e-06, 1e-9)
 check("portfolio SC p vs SKT crit",
       pf_sc["wilcoxon"]["portfolio_vs_skt_krr_rmse_crit"]["p"], 1.9073486328125e-06, 1e-9)
 check("portfolio SC p vs hard-gate crit",
-      pf_sc["wilcoxon"]["portfolio_vs_hard_gate_krr_rmse_crit"]["p"], 1.9073486328125e-05, 1e-9)
-check("portfolio SC SHD-C crit", pf_sc["summary"]["shd"]["krr_rmse_crit"], 18.8053, 0.011)
-check("portfolio SC SHD-C all", pf_sc["summary"]["shd"]["krr_rmse_all"], 15.4225, 0.011)
+      pf_sc["wilcoxon"]["portfolio_vs_hard_gate_krr_rmse_crit"]["p"], 5.7220458984375e-06, 1e-9)
+check("portfolio SC SHD-C crit", pf_sc["summary"]["shd"]["krr_rmse_crit"], 18.3900, 0.011)
+check("portfolio SC SHD-C all", pf_sc["summary"]["shd"]["krr_rmse_all"], 15.4628, 0.011)
 check("portfolio SC KT crit", pf_sc["summary"]["kt"]["krr_rmse_crit"], 23.2562, 0.011)
 check("portfolio SC SKT crit", pf_sc["summary"]["skt"]["krr_rmse_crit"], 21.1946, 0.011)
-check("portfolio SC hard-gate crit", pf_sc["summary"]["hard_gate"]["krr_rmse_crit"], 19.5705, 0.011)
+check("portfolio SC hard-gate crit", pf_sc["summary"]["hard_gate"]["krr_rmse_crit"], 19.2221, 0.011)
 check("portfolio SC crit is a tie with SHD-C (n.s.)",
       1 if pf_sc["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"] > 0.05 else 0, 1, 0)
 
-check("portfolio PM2.5 crit", pf_pm["summary"]["portfolio"]["krr_rmse_crit"], 228.3143, 0.011)
-check("portfolio PM2.5 all", pf_pm["summary"]["portfolio"]["krr_rmse_all"], 87.0824, 0.011)
+check("portfolio PM2.5 crit", pf_pm["summary"]["portfolio"]["krr_rmse_crit"], 224.6667, 0.011)
+check("portfolio PM2.5 all", pf_pm["summary"]["portfolio"]["krr_rmse_all"], 86.6297, 0.011)
 check("portfolio PM2.5 p vs SHD-C crit",
-      pf_pm["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"], 0.5706, 0.001)
+      pf_pm["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"], 0.6477, 0.001)
 check("portfolio PM2.5 p vs SHD-C all",
-      pf_pm["wilcoxon"]["portfolio_vs_shd_krr_rmse_all"]["p"], 3.814697265625e-06, 1e-9)
+      pf_pm["wilcoxon"]["portfolio_vs_shd_krr_rmse_all"]["p"], 1.9073486328125e-06, 1e-9)
 check("portfolio PM2.5 p vs SKT all",
-      pf_pm["wilcoxon"]["portfolio_vs_skt_krr_rmse_all"]["p"], 0.5958, 0.001)
+      pf_pm["wilcoxon"]["portfolio_vs_skt_krr_rmse_all"]["p"], 0.4749, 0.001)
 check("portfolio PM2.5 p vs SKT crit",
-      pf_pm["wilcoxon"]["portfolio_vs_skt_krr_rmse_crit"]["p"], 0.0014324188232421875, 1e-9)
+      pf_pm["wilcoxon"]["portfolio_vs_skt_krr_rmse_crit"]["p"], 9.5367431640625e-06, 1e-9)
 check("portfolio PM2.5 p vs hard-gate all",
       pf_pm["wilcoxon"]["portfolio_vs_hard_gate_krr_rmse_all"]["p"], 1.9073486328125e-06, 1e-9)
-check("portfolio PM2.5 SHD-C crit", pf_pm["summary"]["shd"]["krr_rmse_crit"], 231.0096, 0.011)
-check("portfolio PM2.5 SHD-C all", pf_pm["summary"]["shd"]["krr_rmse_all"], 95.0831, 0.011)
+check("portfolio PM2.5 SHD-C crit", pf_pm["summary"]["shd"]["krr_rmse_crit"], 216.5654, 0.011)
+check("portfolio PM2.5 SHD-C all", pf_pm["summary"]["shd"]["krr_rmse_all"], 101.1519, 0.011)
 check("portfolio PM2.5 KT all", pf_pm["summary"]["kt"]["krr_rmse_all"], 89.8869, 0.011)
 check("portfolio PM2.5 SKT all", pf_pm["summary"]["skt"]["krr_rmse_all"], 86.5269, 0.011)
-check("portfolio PM2.5 hard-gate crit", pf_pm["summary"]["hard_gate"]["krr_rmse_crit"], 238.3592, 0.011)
-check("portfolio PM2.5 hard-gate all", pf_pm["summary"]["hard_gate"]["krr_rmse_all"], 90.6326, 0.011)
+check("portfolio PM2.5 hard-gate crit", pf_pm["summary"]["hard_gate"]["krr_rmse_crit"], 237.1483, 0.011)
+check("portfolio PM2.5 hard-gate all", pf_pm["summary"]["hard_gate"]["krr_rmse_all"], 90.3050, 0.011)
 check("portfolio PM2.5 beats SKT on crit",
       1 if pf_pm["summary"]["portfolio"]["krr_rmse_crit"]
       < pf_pm["summary"]["skt"]["krr_rmse_crit"] else 0, 1, 0)
@@ -808,18 +817,18 @@ check("portfolio PM2.5 does NOT beat SKT on global",
       1 if pf_pm["summary"]["portfolio"]["krr_rmse_all"]
       > pf_pm["summary"]["skt"]["krr_rmse_all"] else 0, 1, 0)
 
-check("portfolio reactor crit", pf_re["summary"]["portfolio"]["krr_rmse_crit"], 3.6463, 0.006)
-check("portfolio reactor all", pf_re["summary"]["portfolio"]["krr_rmse_all"], 0.9937, 0.006)
+check("portfolio reactor crit", pf_re["summary"]["portfolio"]["krr_rmse_crit"], 3.3176, 0.006)
+check("portfolio reactor all", pf_re["summary"]["portfolio"]["krr_rmse_all"], 0.9754, 0.006)
 check("portfolio reactor p vs SHD-C crit",
-      pf_re["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"], 9.5367431640625e-06, 1e-9)
+      pf_re["wilcoxon"]["portfolio_vs_shd_krr_rmse_crit"]["p"], 3.814697265625e-06, 1e-9)
 check("portfolio reactor p vs SHD-C all",
-      pf_re["wilcoxon"]["portfolio_vs_shd_krr_rmse_all"]["p"], 0.00365447998046875, 0.001)
+      pf_re["wilcoxon"]["portfolio_vs_shd_krr_rmse_all"]["p"], 0.7012, 0.001)
 check("portfolio reactor p vs hard-gate crit",
-      pf_re["wilcoxon"]["portfolio_vs_hard_gate_krr_rmse_crit"]["p"], 6.29425048828125e-05, 1e-9)
-check("portfolio reactor SHD-C crit", pf_re["summary"]["shd"]["krr_rmse_crit"], 3.4364, 0.006)
-check("portfolio reactor SHD-C all", pf_re["summary"]["shd"]["krr_rmse_all"], 0.9756, 0.006)
-check("portfolio reactor hard-gate crit", pf_re["summary"]["hard_gate"]["krr_rmse_crit"], 4.2002, 0.006)
-check("portfolio reactor hard-gate all", pf_re["summary"]["hard_gate"]["krr_rmse_all"], 1.1163, 0.006)
+      pf_re["wilcoxon"]["portfolio_vs_hard_gate_krr_rmse_crit"]["p"], 3.814697265625e-06, 1e-9)
+check("portfolio reactor SHD-C crit", pf_re["summary"]["shd"]["krr_rmse_crit"], 3.0401, 0.006)
+check("portfolio reactor SHD-C all", pf_re["summary"]["shd"]["krr_rmse_all"], 0.9686, 0.006)
+check("portfolio reactor hard-gate crit", pf_re["summary"]["hard_gate"]["krr_rmse_crit"], 4.0570, 0.006)
+check("portfolio reactor hard-gate all", pf_re["summary"]["hard_gate"]["krr_rmse_all"], 1.1065, 0.006)
 check("portfolio reactor is WORSE than SHD-C on crit",
       1 if pf_re["summary"]["portfolio"]["krr_rmse_crit"]
       > pf_re["summary"]["shd"]["krr_rmse_crit"] else 0, 1, 0)
@@ -835,24 +844,29 @@ check_text_count("bench portfolio GBM arm fits the SHD coreset", ".fit(Xs, ys, s
 
 # the published documents must carry the post-fix numbers, and the pre-fix
 # ones must be GONE (a stale number in prose is a silent false claim)
-check_text_count("README portfolio SC crit", "**18.32**", 1, README)
+check_text_count("README portfolio SC crit", "**18.22**", 1, README)
 check_text_count("README portfolio SC global", "**15.38**", 1, README)
-check_text_count("README portfolio PM2.5 global", "**87.08**", 1, README)
-check_text_count("README portfolio PM2.5 crit", "**228.31**", 1, README)
-check_text_count("README portfolio reactor crit", "crit 3.65 vs", 1, README)
-check_text_count("README portfolio p (SC crit)", "p=0.064", 2, README)
+check_text_count("README portfolio PM2.5 global", "**86.63**", 1, README)
+check_text_count("README portfolio PM2.5 crit", "**224.67**", 1, README)
+check_text_count("README portfolio reactor crit", "crit 3.32 vs", 1, README)
+check_text_count("README portfolio p (SC crit)", "p=0.349", 1, README)
 check_text_count("README documents the GBM duplication", "GBM column duplicates the SHD arm", 1, README)
 check_absent("README no stale portfolio crit", "crit **17.95**", README)
 check_absent("README no stale portfolio PM2.5 crit", "**227.27**", README)
 check_absent("README no stale portfolio global", "**86.67**", README)
+check_absent("README no pre-2026-11-13 portfolio SC crit", "**18.32**", README)
+check_absent("README no pre-2026-11-13 portfolio PM2.5 global", "**87.08**", README)
+check_absent("README no pre-2026-11-13 portfolio PM2.5 crit", "**228.31**", README)
 check_absent("README no in-flight marker", "Re-measurement in flight", README)
 check_absent("README no stale Pareto claim", "Pareto-best: crit", README)
-check_text_count("industry doc portfolio SC crit", "**18.32**", 1, INDUSTRY)
-check_text_count("industry doc portfolio PM2.5 global", "**87.08**", 1, INDUSTRY)
-check_text_count("industry doc portfolio reactor", "3.65 vs 3.44", 2, INDUSTRY)
+check_text_count("industry doc portfolio SC crit", "**18.22**", 1, INDUSTRY)
+check_text_count("industry doc portfolio PM2.5 global", "**86.63**", 1, INDUSTRY)
+check_text_count("industry doc portfolio reactor", "3.32 vs 3.04", 2, INDUSTRY)
 check_absent("industry doc no stale SC crit", "**17.95**", INDUSTRY)
 check_absent("industry doc no stale PM2.5 crit", "**227.27**", INDUSTRY)
 check_absent("industry doc no stale global", "**86.67**", INDUSTRY)
+check_absent("industry doc no pre-2026-11-13 SC crit", "**18.32**", INDUSTRY)
+check_absent("industry doc no pre-2026-11-13 PM2.5 global", "**87.08**", INDUSTRY)
 check_absent("industry doc no stale Pareto claim",
              "Pareto-лучший**: crit", INDUSTRY)
 
@@ -955,9 +969,9 @@ for _needle in ("aucV 0.831", "aucV 0.974", "aucV 0.799",
                 "MiniBatchKMeans 5.14", "MBK predict 0.74"):
     check_absent("readme unbacked " + _needle, _needle, README)
 
-check_digest("portfolio SC artifact digest", artifact_digest(pf_sc), "beb4cb166c8262c5fc6fbce125cb3fc21400e26d84bfed1e9e6d6daef94bbf0d")
-check_digest("portfolio PM2.5 artifact digest", artifact_digest(pf_pm), "5bd9ae9e63e1752dc679e3bef9122263fd15d9d6dbfe4464e53ce80426782188")
-check_digest("portfolio reactor artifact digest", artifact_digest(pf_re), "f6c2ded19c12c4d301c79e87b8f6cdf3ebe774acc85e34a3dcb61e9fd9b73521")
+check_digest("portfolio SC artifact digest", artifact_digest(pf_sc), "282c31d352ce58eb1ed92c895d686078f3d90964e4f589ff777531e4deaa6de7")
+check_digest("portfolio PM2.5 artifact digest", artifact_digest(pf_pm), "0567106d3bfe8a1dc0508694ef93ba19f2928ff53665dc594a671ba10c213447")
+check_digest("portfolio reactor artifact digest", artifact_digest(pf_re), "752a680a985b8137159abb74864f4e66b4ee81fd83c5014c50b0c991f738e975")
 check_digest("global-guard artifact digest", artifact_digest(gg), "ae096e1578291373babce23253cfb3cd699bd45df5d47d053700d7f949ee1ce9")
 
 print(f"\n{checks} checks, {len(failures)} failures")

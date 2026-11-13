@@ -103,8 +103,8 @@ def npz_output_path(path: str) -> str:
 class SpectralHologramDistiller:
     """Streaming distiller (phase-manifold synthesis).
 
-    Port of the reference Colab implementation (cell 9 of ``Untitled22.ipynb``),
-    kept numerically identical to the published benchmark numbers.
+    The default path is kept numerically identical to the published benchmark
+    numbers.
 
     Parameters
     ----------
@@ -2830,9 +2830,9 @@ class HologramCrystalLoader:
 
         With ``U`` the unit-row-normalized Random Fourier Features of the
         window and ``U_ref`` the same features of the crystal's stored medoids
-        (``self.X``), returns the squared unbiased MMD estimator
+        (``self.X``), returns the biased (V-statistic) squared MMD estimator
 
-            biassed_MMD^2 = || mean(U) - mean(U_ref) ||^2
+            biased_MMD^2 = || mean(U) - mean(U_ref) ||^2
 
         in RFF space. It measures first-moment shift in the Fourier feature
         space and complements the BW second-moment term: a shift that moves

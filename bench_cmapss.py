@@ -22,8 +22,10 @@ Protocol:
   literature. No other feature engineering: this benchmark compares CORESET
   methods under identical raw features and models, not RUL pipelines.
 - Target: piecewise-linear RUL capped at 125 cycles (the standard
-  transform). The critical regime is the low tail `y <= 25` -- the last 25
-  cycles before failure (12.1% of train rows) -- so `tail="low"`.
+  transform), RUL = life - cyc -- the official convention of
+  RUL_FD001.txt, so train and test labels share one convention. The
+  critical regime is the low tail `y <= 25` -- the last cycles before
+  failure -- so `tail="low"`.
 - Test protocol: the official FD001 evaluation -- predict RUL at each test
   engine's last cycle (100 predictions). Metrics: RMSE over all 100
   engines, RMSE over the 19 engines whose true RUL <= 25, and the
@@ -82,7 +84,7 @@ def load_fd001():
     cols = [4 + s for s in SENSORS]  # col 0 = unit, 1 = cycle, 2..4 = op settings
     unit, cyc = tr[:, 0], tr[:, 1]
     life = np.array([np.max(cyc[unit == u]) for u in range(1, 101)])
-    y_tr = np.minimum(life[unit.astype(int) - 1] - cyc + 1.0, RUL_CAP)
+    y_tr = np.minimum(life[unit.astype(int) - 1] - cyc, RUL_CAP)
     X_tr = tr[:, cols]
 
     last_idx = np.array([np.max(np.nonzero(te[:, 0] == u)[0]) for u in range(1, 101)])
