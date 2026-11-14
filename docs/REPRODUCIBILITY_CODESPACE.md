@@ -44,3 +44,18 @@ gh codespace ssh -c <name> -- "cat /tmp/cmapss_codespace.json" > codespace.json
 - Library versions must match the artifact-generation environment for
   bit-for-bit equality; the versions above do. A future `requirements-lock.txt`
   would make this explicit.
+
+## Headline `bench_seeds` (SC + reactor, 20 seeds)
+
+Also reproduced on the codespace (`bench_seeds.py --seeds 20 --dataset both`):
+
+- **Reactor: 20 / 20** arm-by-metric medians exact (max abs diff `0.0`).
+- **Superconductivity: 19 / 20** exact. The single deviation is the **K-Means
+  baseline's GBM** metric (`gbm_rmse_all` 17.14118 vs 17.18934, diff 0.048;
+  `gbm_r2` 0.74474 vs 0.74331) --- not SHD. SHD's own numbers match exactly
+  (critical KRR 18.8053 on both machines). The deviation is consistent with
+  K-Means / GBM tie-breaking under the Python minor-version difference
+  (laptop 3.14 vs codespace 3.12/3.13); the published SHD claims are unaffected.
+
+`requirements-lock.txt` now pins the core versions (numpy 2.5.4, scipy 1.18.1,
+scikit-learn 1.9.1) for explicit reproducibility.
