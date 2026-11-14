@@ -32,7 +32,7 @@
 \maketitle
 
 \begin{abstract}
-Machine learning on high-throughput sensor telemetry and experimental physics streams faces a triad of unresolved challenges: (i) sample-efficiency bottlenecks where critical regimes can be a small fraction of observations (3\% in the reactor and PM2.5 streams; 18.6\% for the $T_c \ge 77\,\mathrm{K}$ superconductivity regime) and are under-represented by standard downsampling; (ii) prohibitively expensive dataset distillation methods that require hundreds of GPU-hours of bi-level optimization; and (iii) the inability of static coresets to adapt to non-stationary drift without re-processing the historical corpus. We propose \textbf{Spectral Hologram Distiller (SHD)}, a zero-GPU, bounded-memory streaming framework that compresses telemetry into compact ``crystals'' of real medoids with an analytical spectral passport. SHD projects data into a dual-scale Bochner random Fourier feature space, triggers candidates via a two-tailed residual-leverage filter, and clusters the coupled feature-target phase manifold $[\mathbf{Z} \parallel \kappa \cdot y]$ to allocate dedicated Voronoi cells to rare regimes. Coreset weights are solved at crystallization via non-negative FISTA herding and blended with tempered Voronoi volumes. Each crystal stores a 16-bit top-32 spectral passport enabling a millisecond-scale Bures--Wasserstein radar (approximately 50\,ms in the historical heal experiment; corrected verified-row measurements span 2.21--62.35\,ms for 64--2{,}808 rows) that flags out-of-distribution drift without raw data, followed by surgical healing with bounded forgetting. On the 81-dimensional UCI Superconductivity benchmark across 20 seeds, a 300-medoid crystal ($\approx 98$\,KB, $70\times$ compression) reaches a critical-regime ($T_c \ge 77\,\mathrm{K}$) KRR RMSE of $18.81\,\mathrm{K}$, outperforming Random ($22.43\,\mathrm{K}$), $K$-Means ($22.93\,\mathrm{K}$), Kernel Thinning ($23.26\,\mathrm{K}$), and Supervised Kernel Thinning ($21.20\,\mathrm{K}$; all $p = 1.9 \times 10^{-6}$, Holm $4.6 \times 10^{-5}$), while approaching the 9,000-point KRR oracle ($17.59\,\mathrm{K}$; $+6.9\%$). In Bayesian optimization for phase-boundary recovery, SHD finds 6 of 12 pocket points in its top-20 EI acquisitions versus 0 for both baselines, with F1 $= 1.000$.
+Machine learning on high-throughput sensor telemetry and experimental physics streams faces a triad of unresolved challenges: (i) sample-efficiency bottlenecks where critical regimes can be a small fraction of observations (3\% in the reactor and PM2.5 streams; 18.6\% for the $T_c \ge 77\,\mathrm{K}$ superconductivity regime) and are under-represented by standard downsampling; (ii) prohibitively expensive dataset distillation methods that require hundreds of GPU-hours of bi-level optimization; and (iii) the inability of static coresets to adapt to non-stationary drift without re-processing the historical corpus. We propose \textbf{Spectral Hologram Distiller (SHD)}, a zero-GPU, bounded-memory streaming framework that compresses telemetry into compact ``crystals'' of real medoids with an analytical spectral passport. SHD projects data into a dual-scale Bochner random Fourier feature space, triggers candidates via a two-tailed residual-leverage filter, and clusters the coupled feature-target phase manifold $[\mathbf{Z} \parallel \kappa \cdot y]$ to allocate dedicated Voronoi cells to rare regimes. Coreset weights are solved at crystallization via non-negative FISTA herding and blended with tempered Voronoi volumes. Each crystal stores a 16-bit top-32 spectral passport enabling a millisecond-scale Bures--Wasserstein radar (approximately 50\,ms in the historical heal experiment; corrected verified-row measurements span 2.21--62.35\,ms for 64--2{,}808 rows) that flags out-of-distribution drift without raw data, followed by surgical healing with bounded forgetting. On the 81-dimensional UCI Superconductivity benchmark across 20 seeds, a 300-medoid crystal ($\approx 98$\,KB; $70\times$ row compression, 300 of 21{,}263 rows) reaches a critical-regime ($T_c \ge 77\,\mathrm{K}$) KRR RMSE of $18.81\,\mathrm{K}$, outperforming Random ($22.43\,\mathrm{K}$), $K$-Means ($22.93\,\mathrm{K}$), Kernel Thinning ($23.26\,\mathrm{K}$), and Supervised Kernel Thinning ($21.20\,\mathrm{K}$; all $p = 1.9 \times 10^{-6}$, Holm $4.6 \times 10^{-5}$), while approaching the 9,000-point KRR oracle ($17.59\,\mathrm{K}$; $+6.9\%$). In Bayesian optimization for phase-boundary recovery, SHD finds 6 of 12 pocket points in its top-20 EI acquisitions versus 0 for both baselines, with F1 $= 1.000$.
 \end{abstract}
 
 \section{Introduction}
@@ -54,7 +54,7 @@ To resolve these challenges simultaneously, we introduce the \textbf{Spectral Ho
     \item \textbf{Two-Tailed Residual \& Leverage Trigger:} An online Ridge predictor on the RFF sketch scores streaming rows by prediction residual and directional target extremity (high, low, or bidirectional), directing phase-peak reservation. In label-free mode, Bochner spectral leverage scores substitute for targets.
     \item \textbf{Closed-Form Spectral Passport \& Millisecond-Scale Radar:} Each distilled crystal of real medoids is accompanied by a 16-bit spectral passport comprising the top-32 eigenpairs of the empirical feature covariance. By projecting incoming windows onto this 32-dimensional subspace, a Bures--Wasserstein metric \citep{bhatia2019bures} detects out-of-distribution drift without raw data access (historical median: approximately 50\,ms for the heal window). An earlier latency script silently truncated oversize windows; its batch-size claims are withdrawn. The corrected rerun (verified row counts, 5 repeats, one host) measures 2.21--62.35\,ms for 64--2{,}808-row windows.
     \item \textbf{Lifelong Continual Healing:} Upon radar trigger, SHD injects new medoids into the crystal while pruning only lowest-weight non-protected cells, preserving the protected phase-peak band. This limits catastrophic forgetting without storing past streams: old-domain RMSE degrades from 7.32 to 13.36\,K, versus 20.62\,K under naive overwrite.
-    \item \textbf{Empirical Rigor:} Across 20 independent seeds on the 81-dimensional UCI Superconductivity dataset \citep{hamidieh2018data} and a 4D phase-transition reactor, SHD demonstrates statistically significant superiority on the critical regime ($p < 10^{-5}$, paired Wilcoxon, Holm-corrected) over Random, $K$-Means, Kernel Thinning \citep{dwivedi2024kernel}, and Supervised Kernel Thinning \citep{gong2024supervised}; global metrics are competitive but not uniformly superior (SKT wins SC GBM-all by 0.09\,K, n.s.; $K$-Means wins reactor GBM-all by 0.03\,K, n.s.).
+    \item \textbf{Empirical Rigor:} Across 20 coreset-construction seeds (fixed 80/20 split) on the 81-dimensional UCI Superconductivity dataset \citep{hamidieh2018data} and a 4D phase-transition reactor, SHD demonstrates statistically significant superiority on the critical regime ($p < 10^{-5}$, paired Wilcoxon, Holm-corrected) over Random, $K$-Means, Kernel Thinning \citep{dwivedi2024kernel}, and Supervised Kernel Thinning \citep{gong2024supervised}; global metrics are competitive but not uniformly superior (SKT wins SC GBM-all by 0.09\,K, n.s.; $K$-Means wins reactor GBM-all by 0.03\,K, n.s.).
 \end{itemize}
 
 \section{The Spectral Hologram Distiller Architecture}
@@ -104,9 +104,9 @@ Rather than assigning uniform weights $1/M$, SHD solves at crystallization time 
 \begin{equation}
     \min_{\boldsymbol{\gamma} \ge 0} \frac{1}{2} \left\| \sum_{m=1}^M \gamma_m \mathbf{u}_m \mathbf{u}_m^\top - \hat{\boldsymbol{\Psi}} \right\|_F^2.
 \end{equation}
-We solve this convex inverse problem in 250 steps of the Fast Iterative Shrinkage-Thresholding Algorithm (FISTA) \citep{beck2009fast}. The final sample weights $\mathbf{w} \in \mathbb{R}^M$ blend geometric Voronoi cell volumes $\mathbf{p} = \mathbf{n}_{\text{cell}} / n_{\text{seen}}$ with herding weights (both terms normalized to mean one):
+We solve this convex inverse problem in 250 steps of the Fast Iterative Shrinkage-Thresholding Algorithm (FISTA) \citep{beck2009fast}. The final sample weights $\mathbf{w} \in \mathbb{R}^M$ blend geometric Voronoi cell volumes $\mathbf{p} = \mathbf{n}_{\text{cell}} / n_{\text{seen}}$ with herding weights, each term normalized to mean one (the herding solution $\boldsymbol{\gamma}^*$ is rescaled by $M / \sum_m \gamma^*_m$):
 \begin{equation}
-    \mathbf{w} = 0.75 \cdot \frac{\mathbf{p}^{0.55}}{\text{mean}(\mathbf{p}^{0.55})} + 0.25 \cdot \boldsymbol{\gamma}^*.
+    \mathbf{w} = 0.75 \cdot \frac{\mathbf{p}^{0.55}}{\text{mean}(\mathbf{p}^{0.55})} + 0.25 \cdot \frac{M\,\boldsymbol{\gamma}^*}{\sum_m \gamma^*_m}.
 \end{equation}
 
 \subsection{Spectral Passport, Bures--Wasserstein Radar, and Continual Healing}
@@ -130,13 +130,13 @@ A batch-adaptive threshold $\tau(B) = 0.085 \cdot \max(1, \sqrt{1024/B})$ trigge
 
 \subsection{Multi-Seed Benchmarks on Physical Science Datasets}
 
-We evaluate SHD across 20 independent seeds on two primary testbeds (one real, one synthetic), plus a third real stream in Section~\ref{sec:pm25}:
+We evaluate SHD across 20 coreset-construction seeds (fixed split) on two primary testbeds (one real, one synthetic), plus a third real stream in Section~\ref{sec:pm25}:
 \begin{enumerate}
     \item \textbf{UCI Superconductivity} \citep{hamidieh2018data}: 21,263 materials characterized by 81 chemical/physical features. The goal is to predict superconducting transition temperature $T_c$. The critical regime is defined as high-temperature superconductors ($T_c \ge 77\,\mathrm{K}$, liquid nitrogen boundary), comprising 18.6\% of the dataset (3,952 / 21,263; 778 of 4,253 test rows).
-    \item \textbf{4D Phase-Transition Reactor}: 20,000 observations of a 4-dimensional non-linear chemical dynamics system with an exothermic transition peak exceeding the 97th percentile of $y$.
+    \item \textbf{4D Phase-Transition Reactor}: 20,000 observations (16,000 train / 4,000 test, 80/20 split) of a 4-dimensional non-linear chemical dynamics system with an exothermic transition peak exceeding the 97th percentile of $y$.
 \end{enumerate}
 
-Every method compresses the training stream to an identical budget of $M = 300$ medoids. Downstream evaluation uses Kernel Ridge Regression (KRR, RBF kernel with $\gamma = 1 / (1.1 \cdot d)$) and Histogram Gradient Boosting (GBM). All tests report median and interquartile range (IQR) across 20 seeds; significance is assessed via two-sided paired Wilcoxon signed-rank tests against SHD, Holm-adjusted within each dataset/metric family. Tables report raw $p$; the text notes where Holm changes a conclusion. The Wins column counts seeds in which SHD has lower critical-regime KRR RMSE.
+Every method compresses the training stream to an identical budget of $M = 300$ medoids. Downstream evaluation uses Kernel Ridge Regression (KRR, RBF kernel with $\gamma = 1 / (1.1 \cdot d)$) and Histogram Gradient Boosting (GBM). All tests report median and interquartile range (IQR) across 20 coreset-construction seeds on a fixed 80/20 train/test split (split seed 42); seed-to-seed variation isolates coreset randomness, not data-split variability. Significance is assessed via two-sided paired Wilcoxon signed-rank tests against SHD, Holm-adjusted within each dataset/metric family. Tables report raw $p$; the text notes where Holm changes a conclusion. The Wins column counts seeds in which SHD has lower critical-regime KRR RMSE.
 
 \begin{table*}[t]
 \centering
@@ -208,7 +208,7 @@ Superconductivity & \textbf{15.57} / 15.99 & \textbf{18.98} / 19.38 & \textbf{18
 
 The superconductivity benchmark has an 18.6\% critical regime; the reactor is synthetic. We therefore evaluate the UCI Beijing PM2.5 stream \citep{liang2015pm25} (41,757 rows, 14 features, time-ordered 80/20 split; critical $=324\,\mu g/m^3$ (top 3\% of the training stream), with 374 critical test rows). This is a deliberately harder regime for the default 26\% band: only 3\% of rows are critical, and the stream has strong seasonal drift.
 
-Table~\ref{tab:pm25} shows the honest result. The single-crystal default loses global RMSE to KT ($95.1$ vs $89.9\,\mu g/m^3$) and Random ($88.2$), and its critical advantage over KT is not significant ($231.0$ vs $245.7$; 13/20, $p=0.216$). The critical-aware band (SHD-C, $\beta$ set from the observed critical fraction) improves critical RMSE to $216.6$ and rare capture to 25, but degrades global KRR to $101.2$. Adding a 300-medoid global guard recovers the global stream ($85.3$ KRR-all, $78.9$ GBM-all) while keeping critical RMSE at $196.0$ and rare capture at 29. This confirms that SHD is not a universal single-crystal replacement: for 3\% regimes the default band must be critical-aware, and production deployments need either a guard or a domain bank (Section~\ref{sec:passport}).
+Table~\ref{tab:pm25} shows the honest result. The single-crystal default loses global RMSE to KT ($95.1$ vs $89.9\,\mu g/m^3$) and Random ($88.2$), and its critical advantage over KT is not significant ($231.0$ vs $245.7$; 13/20, $p=0.216$). The critical-aware band (SHD-C, $\beta$ set from the observed critical fraction) improves critical RMSE to $216.6$ and rare capture to 25, but degrades global KRR to $101.2$. Adding a manual 300-medoid K-Means guard (5 seeds; distinct from the shipped \texttt{global\_guard}, see the table note) recovers the global stream ($85.3$ KRR-all, $78.9$ GBM-all) while keeping critical RMSE at $196.0$ and rare capture at 29. This confirms that SHD is not a universal single-crystal replacement: for 3\% regimes the default band must be critical-aware, and production deployments need either a guard or a domain bank (Section~\ref{sec:passport}).
 
 \begin{table}[t]
 \centering
@@ -225,10 +225,10 @@ Kernel Thinning & 89.89 & 245.74 & 79.85 & 228.81 & 9 \\
 Supervised KT & 86.53 & 246.02 & 78.87 & 221.19 & 9 \\
 SHD (default 26\% band) & 95.08 & 231.01 & 86.11 & 211.91 & 10 \\
 SHD-C (critical-aware band) & 101.15 & 216.57 & 91.26 & 198.42 & 25 \\
-SHD-C + 300-medoid guard & \textbf{85.32} & \textbf{196.02} & 78.92 & \textbf{168.40} & \textbf{29} \\
+SHD-C + manual K-Means guard (5 seeds) & \textbf{85.32} & \textbf{196.02} & 78.92 & \textbf{168.40} & \textbf{29} \\
 \bottomrule
 \end{tabular}
-\vspace{2pt}\footnotesize{The guard row is paired with a 5-seed SHD-C baseline (207.98 / 98.75 / 193.70 / 87.85; rare 25); the 20-seed SHD-C row is shown for reference.}
+\vspace{2pt}\footnotesize{The guard row is a 5-seed MANUAL K-Means concatenation, paired with a 5-seed SHD-C baseline (207.98 / 98.75 / 193.70 / 87.85; rare 25); the 20-seed SHD-C row is shown for reference. It is distinct from the shipped \texttt{global\_guard} (which swaps the 150 lowest-weight rows for K-Means donors): on the tail-97 crystal the shipped guard gives 91.52 KRR-all / 209.15 KRR-crit / 85.86 GBM-all (20 seeds, \texttt{bench\_global\_guard\_results.json}), at the cost of rare capture (26.5 $\to$ 11.5).}
 \end{table}
 
 \subsection{Bayesian Optimization and Critical Boundary Discovery}
@@ -283,6 +283,36 @@ Domain bank (nearest) & $<0.085$ & $<0.085$ & both in \\
 \end{tabular}
 \end{table}
 
+\subsection{Remaining Useful Life on NASA C-MAPSS FD001}
+\label{sec:cmapss}
+The third real dataset is the NASA C-MAPSS FD001 turbofan degradation benchmark: 20,631 training cycles over 100 run-to-failure engines, evaluated with the official protocol (predict remaining useful life at each of the 100 test engines' last cycle; 19 engines are near failure). We use the standard 14-sensor recipe and the official target convention RUL $=$ life $-$ cyc, capped at 125 cycles, so training and test labels share one convention. The critical regime is the low tail $y \le 25$ cycles (12.6\% of training rows, 2,600 rows); SHD runs with \texttt{tail=low} and the band-ratio sweep of Section~\ref{sec:pm25}. Table~\ref{tab:cmapss} reports 20-seed medians.
+
+\begin{table}[t]
+\centering
+\small
+\caption{NASA C-MAPSS FD001 (official last-cycle test, 19 near-failure engines; RUL $=$ life $-$ cyc capped at 125; critical $y \le 25$). RMSE in cycles; lower is better. 20 seeds; rare = near-failure medoids captured (of 2,600).}
+\label{tab:cmapss}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Method} & \textbf{KRR Crit} & \textbf{KRR All} & \textbf{GBM Crit} & \textbf{GBM All} & \textbf{Rare} \\
+\midrule
+Random & 17.63 & 19.80 & 19.07 & 21.06 & 37.5 \\
+$K$-Means & 15.46 & 21.42 & 16.15 & 21.55 & 54.5 \\
+Kernel Thinning & 17.05 & 19.92 & 17.40 & 20.93 & 37.5 \\
+Supervised KT & 15.38 & 19.57 & 16.97 & 20.56 & 38.0 \\
+SHD br=0.26 (default) & 16.08 & 19.65 & 16.17 & 21.52 & 58.0 \\
+SHD br=0.50 & 13.60 & 20.03 & 14.73 & 21.40 & 109.5 \\
+SHD br=0.50, uniform & 13.45 & 20.05 & 14.68 & 21.66 & 109.5 \\
+SHD br=0.65 & 14.54 & 21.38 & 13.61 & 21.77 & 140.5 \\
+SHD br=0.65, uniform & 13.81 & 21.29 & 13.95 & 21.83 & 140.5 \\
+\midrule
+Oracle (KRR 9,000; GBM full) & 13.05 & 17.49 & 16.99 & 18.23 & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At the critical preset br=0.65 the gamma-weighted crystal beats all four baselines on near-failure GBM RMSE (13--17/20 seeds, $p \le 1.1\times10^{-2}$) and beats Random/KT/SKT on near-failure KRR RMSE (12--16/20, $p \le 2.7\times10^{-2}$) while tying $K$-Means (12/20, n.s.). The uniform-weight variant of the same crystal improves KRR critical (13.81 vs 14.54) but not GBM (13.95 vs 13.61): on this low-tail task the weighting choice is model-dependent. No arm beats the KRR oracle on the critical regime (best median 13.45 at br=0.50 uniform versus 13.05, 7/20 seeds), while the GBM full-pool oracle is beaten (16--19/20); no arm beats either oracle on the global fit (0/20). The global cost is real: br=0.65 KRR-all 21.38 versus 19.57 for SKT. The band-ratio optimum is metric- and model-dependent (br=0.50 is KRR-best), repeating the operating-point lesson of Section~\ref{sec:pm25} on a third real dataset.
+
 \subsection{Hyperparameter Sensitivity and Ablation}
 
 Every architectural constant is exposed as a constructor argument, so sensitivity
@@ -294,7 +324,7 @@ time on the 4D reactor (5 seeds, $M=300$).
 \centering
 \small
 \caption{One-at-a-time sensitivity on the 4D reactor (5 seeds, $M=300$).
-Critical-regime KRR RMSE, lower is better. Bold = published default.}
+Critical-regime KRR RMSE, lower is better. Bold = published default. 5-seed medians; the 20-seed default median is 3.436 (Table~\ref{tab:reactor}).}
 \label{tab:ablation}
 \begin{tabular}{lcccc}
 \toprule
@@ -321,11 +351,11 @@ Second, \texttt{phase\_kappa} is the structural constant (removal costs $0.85\,\
 
 \section{Discussion, Limitations, and Future Work}
 
-\textbf{Trade-off Transparency:} In accordance with empirical honesty, SHD is an engineered trade-off: allocating dedicated Voronoi volume to rare regimes slightly degrades global background modeling ($0.546$ vs $0.425$ for $K$-Means background RMSE in the BO benchmark). Furthermore, on smooth Gaussian data lacking distinct phase transitions, $K$-Means achieves comparable global representation. SHD is specifically designed for multi-scale physical streams where extreme operational modes carry asymmetric utility.
+\textbf{Trade-off Transparency:} SHD is an engineered trade-off: allocating dedicated Voronoi volume to rare regimes slightly degrades global background modeling ($0.546$ vs $0.425$ for $K$-Means background RMSE in the BO benchmark). Furthermore, on smooth Gaussian data lacking distinct phase transitions, $K$-Means achieves comparable global representation. SHD is specifically designed for multi-scale physical streams where extreme operational modes carry asymmetric utility.
 
 \textbf{Limitations.} (i) The reactor is synthetic; the second real stream (Beijing PM2.5, 3\% critical, Section~\ref{sec:pm25}) shows that the single-crystal default loses global RMSE, and the fix requires a critical-aware band plus a guard or bank rather than the single-crystal method. (ii) The radar separates strong abrupt shifts perfectly (AUC $=1.0$ on the abrupt benchmark); graded and noisy drift is characterized by a real ROC curve in the repository (median AUC $>0.98$ even for the hardest 20-30 K band), which shows the published single perfect point is an easy-task characterization, not a proof. (iii) The default blended passport can leave both domains above threshold; recalibration accepts the new domain but flags the old, and a domain bank accepts both (Section~\ref{sec:passport}). (iv) We provide no coverage guarantee; the method is empirical. (v) The 15-split data-access and stratification controls use a single dataset.
 
-\textbf{Future Directions:} Immediate engineering priorities include compiling the Bures--Wasserstein radar into bare-metal C for ARM Cortex-M microcontrollers and deploying SHD within sovereign industrial telemetry pipelines. The NASA CMAPSS turbofan benchmark named here as future work is now integrated in the repository (Section 10 of its README): on the FD001 split, with the critical preset ($\mathrm{br}=0.65$, low tail $y \le 25$ cycles) and the official RUL convention (life $-$ cyc, shared by train and test labels after a 2026-11-13 correctness fix), a 300-medoid crystal beats all four baselines on near-failure GBM RMSE ($13$--$17/20$ seeds, $p \le 1.1\times10^{-2}$) and beats Random/KT/SKT on near-failure KRR RMSE ($12$--$16/20$, $p \le 2.7\times10^{-2}$) while tying K-Means ($12/20$, n.s.), at a significant global-fit cost; the uniform-weight variant of the same crystal improves KRR critical ($13.81$ K versus $14.54$ K) but not GBM ($13.95$ K versus $13.61$ K). No arm beats the KRR oracle on the critical regime (best median $13.45$ K at $\mathrm{br}=0.50$ versus $13.05$ K, $7/20$ seeds) --- an earlier oracle-beating claim was an artifact of a train/test label mismatch and is retracted --- while the GBM full-pool oracle is beaten ($16$--$19/20$); no arm beats either oracle on the global fit ($0/20$).
+\textbf{Future Directions:} Immediate engineering priorities include compiling the Bures--Wasserstein radar into bare-metal C for ARM Cortex-M microcontrollers and deploying SHD within sovereign industrial telemetry pipelines. The NASA C-MAPSS FD001 benchmark, previously named here as future work, is now evaluated in Section~\ref{sec:cmapss}. Remaining scientific directions include a theory appendix (a herding MMD bound under the Voronoi prior and finite-sample Bures--Wasserstein concentration) and extending the scalability comparison to near-linear MMD coresets.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
