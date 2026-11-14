@@ -415,6 +415,26 @@ is expected for a coreset method and should be performed on validation data.
 The band-ratio frontier at M=600 (Figure~\ref{fig:frontier}) makes the trade-off explicit.
 Second, \texttt{phase\_kappa} is the structural constant (removal costs $0.85\,\mathrm{K}$), but it is not the only sensitive one: \texttt{high\_band\_ratio}$=0.10$ costs $1.09\,\mathrm{K}$. We recommend keeping $\kappa>0$ and tuning the band width on validation data. The ablation uses 5 seeds; a 10-seed CI replication is reported in the repository.
 
+\subsection{Computational Cost and Deployment Envelope}
+\label{sec:cost}
+SHD is zero-GPU and bounded-memory; Table~\ref{tab:cost} reports the measured on-device cost (one CPU core, synthetic edge cases, and a 250k-row stress probe). The crystal adds only 0.73--0.82\,MB on top of the Python+NumPy process baseline ($\sim$58--69\,MB); the artifact itself is 29--225\,KB. These are single-host, single-core, order-of-magnitude figures --- re-measure on target hardware before quoting them. On a bare microcontroller the interpreter does not fit; the ``29\,KB artifact'' is not a total footprint. Kernel Thinning / SKT at 250k rows were not benchmarked here (their batch cost is $O(n^2)$); near-linear MMD coresets such as COMPRESS \citep{shetty2021compress} are the scalability direction.
+
+\begin{table}[t]
+\centering
+\small
+\caption{On-device cost (one CPU core). Edge cases: synthetic, $M=300$, 3 repeats. Stress: 250k$\times$100 (225k train). Radar at $B=64$; stress radar is the 8-term panel.}
+\label{tab:cost}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Workload} & \textbf{Fit} & \textbf{Load} & \textbf{Artifact} & \textbf{Radar} & \textbf{RSS} \\
+\midrule
+4D sensor, 16k rows & 30.9k rows/s & 3.95 ms & 28.9 KB & 1.22 ms & +0.73 MB \\
+81D Gaussian/sine, 17k rows & 10.9k rows/s & 5.3 ms & 184.9 KB & 1.24 ms & +0.82 MB \\
+250k$\times$100 stress & 28.6 s & --- & 225.2 KB & 117.7 ms & 71.7 MB peak \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \section{Discussion, Limitations, and Future Work}
 
 \textbf{Trade-off Transparency:} SHD is an engineered trade-off: allocating dedicated Voronoi volume to rare regimes slightly degrades global background modeling ($0.546$ vs $0.425$ for $K$-Means background RMSE in the BO benchmark). Furthermore, on smooth Gaussian data lacking distinct phase transitions, $K$-Means achieves comparable global representation. SHD is specifically designed for multi-scale physical streams where extreme operational modes carry asymmetric utility.
