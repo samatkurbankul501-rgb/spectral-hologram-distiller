@@ -12,6 +12,16 @@
 > global +3-4%. Opt-in: the default interval=0 path stays bit-for-bit
 > (artifact: `bench_rebuild_at_finalize_results.json`).
 
+> **2026-11-14 combined critical-first point (opt-in, shipped):** stacking the
+> finalize rebuild with a wider phase-peak band (`high_band_ratio=0.65`, preset
+> `critical_rebuild_max`) pushes critical accuracy past the full-data oracle on
+> both datasets: reactor crit 3.436 -> 1.813 (-47.2%, vs 2.78 oracle), SC 18.805
+> -> 14.874 (-20.9%, vs 17.59 oracle); rare capture 19.5 -> 86 (reactor), 64.5 ->
+> 164 (SC); 20/20 wins on both (p=1.9e-6), 20 seeds paired. Honest cost: global
+> KRR RMSE rises +29.5% (reactor 0.976 -> 1.263) and +7.0% (SC 15.42 -> 16.50),
+> both significant --- use it when the critical regime dominates global utility.
+> Opt-in; default bit-for-bit (same artifact, `combined` arm).
+
 > **2026-11-14 Scania tuned-C regen (20 seeds, shipped):** the 10:1 tuned-logit
 > artifact was regenerated at 20 seeds (was 10). The SHD tuned-logit advantage
 > over Random is now significant (17/20, p=0.0025; was 8/10, p=0.0625 n.s.),

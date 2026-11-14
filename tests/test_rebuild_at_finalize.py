@@ -51,6 +51,32 @@ def test_critical_rebuild_preset_valid():
     SpectralHologramDistiller(crystal_size=32, **params)
 
 
+def test_critical_rebuild_max_preset_valid():
+    validate_presets()
+    params = apply_preset("critical_rebuild_max")
+    assert params == {"rebuild_at_finalize": True, "high_band_ratio": 0.65}
+    SpectralHologramDistiller(crystal_size=32, **params)
+
+
+def test_combined_stacks_critical_capture():
+    # critical_rebuild_max (rebuild + br=0.65) must capture more critical medoids
+    # than rebuild alone (measured reactor rare ~34 -> ~86 at 20 seeds)
+    X, y, crit, _ = load_reactor()
+    X_tr, _, y_tr, _ = train_test_split(X, y, test_size=0.20, random_state=42)
+    rebuild = _build(X_tr, y_tr, 0, rebuild_at_finalize=True)
+    combined = SpectralHologramDistiller(crystal_size=300, high_band_ratio=0.65,
+                                         sketch_dim=256, tail_quantile=84.0,
+                                         phase_kappa=3.2, random_state=0,
+                                         rebuild_at_finalize=True)
+    for i in range(0, len(X_tr), 2500):
+        combined.partial_fit(X_tr[i:i + 2500], y_tr[i:i + 2500])
+    combined.finalize_crystal()
+    rare_rebuild = int(np.sum(rebuild.crystal_Y >= crit))
+    rare_combined = int(np.sum(combined.crystal_Y >= crit))
+    assert rare_combined > rare_rebuild
+    assert rare_combined >= 60
+
+
 def test_rebuild_at_finalize_does_not_periodic_rebuild():
     # with rebuild_at_finalize=True and interval=0, the reservoir is collected
     # but no periodic rebuild fires mid-stream (rows_since_rebuild keeps growing)

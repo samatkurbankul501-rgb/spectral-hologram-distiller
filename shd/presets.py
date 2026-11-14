@@ -86,6 +86,19 @@ PRESETS: dict[str, dict[str, Any]] = {
                   "global +3-4%, fit time +30-85% (still seconds). Opt-in; "
                   "default interval=0 stays bit-for-bit.",
     },
+    "critical_rebuild_max": {
+        "params": {"rebuild_at_finalize": True, "high_band_ratio": 0.65},
+        "source": "Stacks critical_rebuild + critical_first (br=0.65): the "
+                  "extreme critical-first operating point. Measured "
+                  "(bench_rebuild_at_finalize_results.json, combined arm, "
+                  "20 seeds paired): reactor crit 3.436 -> 1.813 (-47.2%, beats "
+                  "the 2.78 oracle by 35%), SC 18.805 -> 14.874 (-20.9%, beats "
+                  "the 17.59 oracle by 15%); rare capture 19.5 -> 86 (reactor), "
+                  "64.5 -> 164 (SC); 20/20 wins both (p=1.9e-6). Cost: global "
+                  "KRR +29.5% (reactor 0.976 -> 1.263), +7.0% (SC 15.42 -> "
+                  "16.50), both significant. Use when critical accuracy "
+                  "dominates global utility. Opt-in; default bit-for-bit.",
+    },
     "sparse_stream_top3pct": {
         "params": {"tail_quantile": 97.0},
         "source": "README section 6 / bench_pm25_rehab: on a top-3% critical "

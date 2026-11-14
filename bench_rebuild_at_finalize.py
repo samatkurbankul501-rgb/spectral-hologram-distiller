@@ -54,8 +54,10 @@ def run(seeds):
         t0 = time.perf_counter()
         for seed in seeds:
             row = {"seed": int(seed)}
-            for arm, kw in [("default", {}), ("rebuild_at_finalize", {"rebuild_at_finalize": True})]:
-                d = SpectralHologramDistiller(crystal_size=300, high_band_ratio=0.26,
+            for arm, kw in [("default", {"high_band_ratio": 0.26}),
+                            ("rebuild_at_finalize", {"high_band_ratio": 0.26, "rebuild_at_finalize": True}),
+                            ("combined", {"high_band_ratio": 0.65, "rebuild_at_finalize": True})]:
+                d = SpectralHologramDistiller(crystal_size=300,
                                               sketch_dim=256, tail_quantile=84.0,
                                               phase_kappa=3.2, random_state=seed, **kw)
                 for i in range(0, len(X_tr), 2500):
@@ -65,24 +67,33 @@ def run(seeds):
                                      scaler, Z_te, y_te, cm, gamma)
             recs.append(row)
         summ = {}
-        for arm in ["default", "rebuild_at_finalize"]:
+        for arm in ["default", "rebuild_at_finalize", "combined"]:
             summ[arm] = {m: float(np.median([r[arm][m] for r in recs]))
                          for m in ["krr_rmse_crit", "krr_rmse_all", "rare_captured"]}
         wil = {}
+        wil_c = {}
         for m in ["krr_rmse_crit", "krr_rmse_all"]:
-            a = np.array([r["rebuild_at_finalize"][m] for r in recs])
             b = np.array([r["default"][m] for r in recs])
+            a = np.array([r["rebuild_at_finalize"][m] for r in recs])
             diff = a - b
             stat, p = (0.0, 1.0) if np.allclose(diff, 0) else wilcoxon(a, b)
             wil[m] = {"wins_rebuild": int(np.sum(diff < 0)), "p_value": float(p),
                       "median_default": float(np.median(b)),
                       "median_rebuild": float(np.median(a))}
+            ac = np.array([r["combined"][m] for r in recs])
+            diffc = ac - b
+            statc, pc = (0.0, 1.0) if np.allclose(diffc, 0) else wilcoxon(ac, b)
+            wil_c[m] = {"wins_combined": int(np.sum(diffc < 0)), "p_value": float(pc),
+                        "median_default": float(np.median(b)),
+                        "median_combined": float(np.median(ac))}
         out["datasets"][name] = {"title": title, "crit_threshold": float(crit),
                                  "records": recs, "summary": summ, "wilcoxon": wil,
+                                 "wilcoxon_combined": wil_c,
                                  "elapsed_sec": time.perf_counter() - t0}
         print(f"[{name}] default crit={summ['default']['krr_rmse_crit']:.4f} "
               f"rebuild crit={summ['rebuild_at_finalize']['krr_rmse_crit']:.4f} "
-              f"rare {summ['default']['rare_captured']:.0f}->{summ['rebuild_at_finalize']['rare_captured']:.0f}", flush=True)
+              f"combined crit={summ['combined']['krr_rmse_crit']:.4f} "
+              f"rare {summ['default']['rare_captured']:.0f}->{summ['combined']['rare_captured']:.0f}", flush=True)
     return out
 
 

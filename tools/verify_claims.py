@@ -419,7 +419,7 @@ PAPER_NEEDLE_COUNTS = {
     '15.42': 1,
     '168.40': 1,
     '18.6\\% of the dataset (3,952 / 21,263; 778 of 4,253 test rows)': 1,
-    '18.81': 3,
+    '18.81': 4,
     '196.02': 1,
     '2.21--62.35': 2,
     '20.62': 2,
@@ -628,7 +628,10 @@ check("preset global_first params",
           "high_band_ratio": 0.26, "tail_quantile": 84.0} else 0, 1, 0)
 check("preset pm25_global params",
       1 if _shd.apply_preset("pm25_global") == {"global_guard": True} else 0, 1, 0)
-check("preset count", len(_shd.PRESETS), 11, 0)
+check("preset count", len(_shd.PRESETS), 12, 0)
+check("preset critical_rebuild_max params",
+      1 if _shd.apply_preset("critical_rebuild_max") == {
+          "rebuild_at_finalize": True, "high_band_ratio": 0.65} else 0, 1, 0)
 check("preset sparse_auto params",
       1 if _shd.apply_preset("sparse_auto") == {
           "tail_quantile": 97.0, "global_guard": True,
@@ -692,7 +695,7 @@ check_text_count("paper recommends combined radar", "recommend the combined rada
 # The default interval=0 online-only lattice under-captures critical rows;
 # a single finalize-time rebuild (opt-in) recovers critical accuracy.
 rebuild = load("bench_rebuild_at_finalize_results.json")
-check_digest("rebuild_at_finalize artifact digest", artifact_digest(rebuild), "94674c0396dff8127b24c5896d5cc23da089a4c6d4e9fc2d365ca5cb1656b9ae")
+check_digest("rebuild_at_finalize artifact digest", artifact_digest(rebuild), "127896a6dde479b9a4b4f83d8a7547ed04495e6ac82e05f5fe526623109dc343")
 check("rebuild_at_finalize 20 seeds", rebuild["n_seeds"], 20, 0)
 _rb_crit = {"reactor": (3.4364, 2.6229), "superconduct": (18.8053, 17.5603)}
 for ds, (dc, rc) in _rb_crit.items():
@@ -703,7 +706,23 @@ for ds, (dc, rc) in _rb_crit.items():
     check(f"rebuild {ds} improves crit", 1 if s["rebuild_at_finalize"]["krr_rmse_crit"] < s["default"]["krr_rmse_crit"] else 0, 1, 0)
     check(f"rebuild {ds} more rare", 1 if s["rebuild_at_finalize"]["rare_captured"] > s["default"]["rare_captured"] else 0, 1, 0)
     check(f"rebuild {ds} crit significant (p<0.05)", 1 if w["p_value"] < 0.05 else 0, 1, 0)
+# combined arm = critical_rebuild_max (rebuild + high_band_ratio=0.65): the
+# extreme critical-first point. Beats default AND rebuild-only on critical RMSE,
+# significant at 20 seeds; the global-RMSE cost is pinned honestly too.
+_rb_comb = {"reactor": (1.8130, 1.2634), "superconduct": (14.8738, 16.4967)}
+for ds, (cc, ca) in _rb_comb.items():
+    s = rebuild["datasets"][ds]["summary"]
+    wc = rebuild["datasets"][ds]["wilcoxon_combined"]["krr_rmse_crit"]
+    check(f"combined {ds} crit", s["combined"]["krr_rmse_crit"], cc, 0.001)
+    check(f"combined {ds} global all", s["combined"]["krr_rmse_all"], ca, 0.001)
+    check(f"combined {ds} beats default crit", 1 if s["combined"]["krr_rmse_crit"] < s["default"]["krr_rmse_crit"] else 0, 1, 0)
+    check(f"combined {ds} beats rebuild crit", 1 if s["combined"]["krr_rmse_crit"] < s["rebuild_at_finalize"]["krr_rmse_crit"] else 0, 1, 0)
+    check(f"combined {ds} more rare", 1 if s["combined"]["rare_captured"] > s["default"]["rare_captured"] else 0, 1, 0)
+    check(f"combined {ds} crit significant (p<0.05)", 1 if wc["p_value"] < 0.05 else 0, 1, 0)
+    check(f"combined {ds} 20/20 wins", wc["wins_combined"], 20, 0)
+    check(f"combined {ds} global cost honest (all rises)", 1 if s["combined"]["krr_rmse_all"] > s["default"]["krr_rmse_all"] else 0, 1, 0)
 check_text_count("readme documents rebuild suppressor", "rebuild_at_finalize=True", 1, README)
+check_text_count("readme documents combined preset", "critical_rebuild_max", 1, README)
 
 # ------------------------------------- v3.15.1 shipped global-guard artifact
 # The presets pm25_global / sparse_auto turn the global guard ON. Until
