@@ -73,6 +73,18 @@ PRESETS: dict[str, dict[str, Any]] = {
                   "the near-failure-accuracy operating point; "
                   "tail_quantile stays at its default 84",
     },
+    "critical_rebuild": {
+        "params": {"rebuild_at_finalize": True},
+        "source": "2026-11-14 suppressor fix (bench_rebuild_at_finalize_results.json, "
+                  "5 seeds): the default interval=0 online-only lattice cannot "
+                  "create critical cells for post-warm-up rows. A single "
+                  "finalize-time rebuild from the whole-stream reservoir "
+                  "recovers critical accuracy: reactor crit 3.346 -> 2.495 "
+                  "(-25%, beats the 2.78 oracle), SC 19.14 -> 17.585 (-8.1%, "
+                  "matches the 17.59 oracle); rare capture 18 -> 35 (reactor), "
+                  "64 -> 73 (SC). Cost: global +3-4%, fit time +30-85% (still "
+                  "seconds). Opt-in; default interval=0 stays bit-for-bit.",
+    },
     "sparse_stream_top3pct": {
         "params": {"tail_quantile": 97.0},
         "source": "README section 6 / bench_pm25_rehab: on a top-3% critical "

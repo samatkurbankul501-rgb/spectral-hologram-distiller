@@ -257,6 +257,7 @@ class SpectralHologramDistiller:
         critical_threshold: float | None = None,
         auto_band_ratio: bool = False,
         lattice_rebuild_interval: int = 0,
+        rebuild_at_finalize: bool = False,
         peak_z_threshold: float = 2.0,
         passport_reference: str = "stream",
         global_guard: bool = False,
@@ -341,6 +342,14 @@ class SpectralHologramDistiller:
             )
         self.auto_band_ratio = bool(auto_band_ratio)
         self.lattice_rebuild_interval = int(lattice_rebuild_interval)
+        # Opt-in (2026-11-14 suppressor fix): collect the reservoir throughout
+        # the stream and rebuild the lattice ONCE at finalize_crystal(), with
+        # no periodic rebuilds. Recovers critical-band allocation that the
+        # default interval=0 online-only path leaves on the table (measured:
+        # reactor crit 3.346 -> 2.495, SC 19.14 -> 17.585, 5 seeds). Default
+        # False keeps the published path bit-for-bit (no reservoir, no extra
+        # RNG consumption).
+        self.rebuild_at_finalize = bool(rebuild_at_finalize)
         if self.lattice_rebuild_interval < 0:
             raise ValueError(
                 f"lattice_rebuild_interval must be >= 0, got {lattice_rebuild_interval}"
@@ -1395,7 +1404,7 @@ class SpectralHologramDistiller:
         # Retain a bounded sample of every row for a later lattice rebuild.
         # This is what lets a rare regime that appears LATE in the stream reach
         # the crystal (see lattice_rebuild_interval).
-        if self.lattice_rebuild_interval > 0:
+        if self.lattice_rebuild_interval > 0 or self.rebuild_at_finalize:
             self._reservoir_add(Z_B, X_batch, y_batch, U_B, phase_score)
 
         # v3.15.1: feed the guard's donor reservoir. It is ALWAYS fed (not
@@ -1555,7 +1564,7 @@ class SpectralHologramDistiller:
         # so rebuild once from it before committing the medoids. Gated on
         # interval>0 AND rows arrived since the last rebuild: the default
         # interval=0 path never collects a reservoir and stays bit-for-bit.
-        if self.lattice_rebuild_interval > 0 and self._rows_since_rebuild > 0:
+        if (self.lattice_rebuild_interval > 0 or self.rebuild_at_finalize) and self._rows_since_rebuild > 0:
             self._rebuild_lattice_from_reservoir()
 
         order = np.argsort(self.counts)[::-1]

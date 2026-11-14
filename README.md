@@ -1,5 +1,17 @@
 # Spectral Hologram Distiller (SHD v3.15.2)
 
+> **2026-11-14 suppressor hunt (opt-in fix shipped):** the default
+> `lattice_rebuild_interval=0` builds the lattice on the warm-up window and
+> only nudges centres online --- it cannot create critical cells for rows
+> arriving after warm-up, leaving critical accuracy on the table. A single
+> finalize-time rebuild from the whole-stream reservoir
+> (`rebuild_at_finalize=True`, preset `critical_rebuild`) recovers it:
+> reactor crit 3.346 -> 2.495 (-25%, beats the 2.78 oracle), SC 19.14 ->
+> 17.585 (-8.1%, matches the 17.59 oracle); rare capture 18 -> 35 (reactor),
+> 64 -> 73 (SC), 5/5 wins both (p=0.0625, the n=5 Wilcoxon floor). Cost:
+> global +3-4%. Opt-in: the default interval=0 path stays bit-for-bit
+> (artifact: `bench_rebuild_at_finalize_results.json`).
+
 > **2026-11-14 Scania tuned-C regen (20 seeds, shipped):** the 10:1 tuned-logit
 > artifact was regenerated at 20 seeds (was 10). The SHD tuned-logit advantage
 > over Random is now significant (17/20, p=0.0025; was 8/10, p=0.0625 n.s.),

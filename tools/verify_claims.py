@@ -628,7 +628,7 @@ check("preset global_first params",
           "high_band_ratio": 0.26, "tail_quantile": 84.0} else 0, 1, 0)
 check("preset pm25_global params",
       1 if _shd.apply_preset("pm25_global") == {"global_guard": True} else 0, 1, 0)
-check("preset count", len(_shd.PRESETS), 10, 0)
+check("preset count", len(_shd.PRESETS), 11, 0)
 check("preset sparse_auto params",
       1 if _shd.apply_preset("sparse_auto") == {
           "tail_quantile": 97.0, "global_guard": True,
@@ -687,6 +687,20 @@ for b in modes["by_batch"]:
         check(f"radar_modes B={b} {name} combined >= bw", 1 if row["combined"] >= row["bw"] - 1e-9 else 0, 1, 0)
 check("radar_modes B256 partial25 all perfect", 1 if all(modes["by_batch"]["256"]["partial_0.25"][m] >= 0.999 for m in ("bw", "combined", "panel")) else 0, 1, 0)
 check_text_count("paper recommends combined radar", "recommend the combined radar", 1, PAPER)
+
+# ------------------------------------- rebuild_at_finalize suppressor fix
+# The default interval=0 online-only lattice under-captures critical rows;
+# a single finalize-time rebuild (opt-in) recovers critical accuracy.
+rebuild = load("bench_rebuild_at_finalize_results.json")
+check_digest("rebuild_at_finalize artifact digest", artifact_digest(rebuild), "0d700ee790bb716c27fdf6b13f8fd54c7d96895060295d2680c4e63be5755257")
+_rb_crit = {"reactor": (3.3458, 2.4952), "superconduct": (19.1385, 17.5852)}
+for ds, (dc, rc) in _rb_crit.items():
+    s = rebuild["datasets"][ds]["summary"]
+    check(f"rebuild {ds} default crit", s["default"]["krr_rmse_crit"], dc, 0.001)
+    check(f"rebuild {ds} rebuild crit", s["rebuild_at_finalize"]["krr_rmse_crit"], rc, 0.001)
+    check(f"rebuild {ds} improves crit", 1 if s["rebuild_at_finalize"]["krr_rmse_crit"] < s["default"]["krr_rmse_crit"] else 0, 1, 0)
+    check(f"rebuild {ds} more rare", 1 if s["rebuild_at_finalize"]["rare_captured"] > s["default"]["rare_captured"] else 0, 1, 0)
+check_text_count("readme documents rebuild suppressor", "rebuild_at_finalize=True", 1, README)
 
 # ------------------------------------- v3.15.1 shipped global-guard artifact
 # The presets pm25_global / sparse_auto turn the global guard ON. Until

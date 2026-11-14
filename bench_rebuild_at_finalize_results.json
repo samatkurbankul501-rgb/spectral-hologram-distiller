@@ -1,0 +1,201 @@
+{
+ "n_seeds": 5,
+ "datasets": {
+  "reactor": {
+   "title": "Reactor 4D (phase transition)",
+   "crit_threshold": 6.297636999032604,
+   "records": [
+    {
+     "seed": 0,
+     "default": {
+      "krr_rmse_crit": 3.4397910631350466,
+      "krr_rmse_all": 0.9610802988190918,
+      "rare_captured": 18
+     },
+     "rebuild_at_finalize": {
+      "krr_rmse_crit": 2.3094768304898,
+      "krr_rmse_all": 1.023662749706131,
+      "rare_captured": 38
+     }
+    },
+    {
+     "seed": 1,
+     "default": {
+      "krr_rmse_crit": 3.345817645479754,
+      "krr_rmse_all": 0.9635976226411297,
+      "rare_captured": 22
+     },
+     "rebuild_at_finalize": {
+      "krr_rmse_crit": 2.4100033968493717,
+      "krr_rmse_all": 1.0084825045958636,
+      "rare_captured": 35
+     }
+    },
+    {
+     "seed": 2,
+     "default": {
+      "krr_rmse_crit": 3.6405789703887597,
+      "krr_rmse_all": 1.0188860164352747,
+      "rare_captured": 16
+     },
+     "rebuild_at_finalize": {
+      "krr_rmse_crit": 2.4951953001973286,
+      "krr_rmse_all": 0.979477039011886,
+      "rare_captured": 29
+     }
+    },
+    {
+     "seed": 3,
+     "default": {
+      "krr_rmse_crit": 3.154531397054786,
+      "krr_rmse_all": 0.9727015566808255,
+      "rare_captured": 24
+     },
+     "rebuild_at_finalize": {
+      "krr_rmse_crit": 2.7635493155453754,
+      "krr_rmse_all": 0.9771572048814516,
+      "rare_captured": 35
+     }
+    },
+    {
+     "seed": 4,
+     "default": {
+      "krr_rmse_crit": 3.1286191679258564,
+      "krr_rmse_all": 0.9598050889233011,
+      "rare_captured": 18
+     },
+     "rebuild_at_finalize": {
+      "krr_rmse_crit": 2.631363233510498,
+      "krr_rmse_all": 1.0104885462710318,
+      "rare_captured": 37
+     }
+    }
+   ],
+   "summary": {
+    "default": {
+     "krr_rmse_crit": 3.345817645479754,
+     "krr_rmse_all": 0.9635976226411297,
+     "rare_captured": 18.0
+    },
+    "rebuild_at_finalize": {
+     "krr_rmse_crit": 2.4951953001973286,
+     "krr_rmse_all": 1.0084825045958636,
+     "rare_captured": 35.0
+    }
+   },
+   "wilcoxon": {
+    "krr_rmse_crit": {
+     "wins_rebuild": 5,
+     "p_value": 0.0625,
+     "median_default": 3.345817645479754,
+     "median_rebuild": 2.4951953001973286
+    },
+    "krr_rmse_all": {
+     "wins_rebuild": 1,
+     "p_value": 0.1875,
+     "median_default": 0.9635976226411297,
+     "median_rebuild": 1.0084825045958636
+    }
+   },
+   "elapsed_sec": 13.127169199999116
+  },
+  "superconduct": {
+   "title": "UCI Superconductivity",
+   "crit_threshold": 77.0,
+   "records": [
+    {
+     "seed": 0,
+     "default": {
+      "krr_rmse_crit": 19.138536665887507,
+      "krr_rmse_all": 15.397782586823379,
+      "rare_captured": 60
+     },
+     "rebuild_at_finalize": {
+      "krr_rmse_crit": 17.765962736518702,
+      "krr_rmse_all": 15.699011020392234,
+      "rare_captured": 77
+     }
+    },
+    {
+     "seed": 1,
+     "default": {
+      "krr_rmse_crit": 19.408322095114777,
+      "krr_rmse_all": 15.508978385030774,
+      "rare_captured": 64
+     },
+     "rebuild_at_finalize": {
+      "krr_rmse_crit": 17.585192950644085,
+      "krr_rmse_all": 15.53224978892466,
+      "rare_captured": 73
+     }
+    },
+    {
+     "seed": 2,
+     "default": {
+      "krr_rmse_crit": 19.20445357448908,
+      "krr_rmse_all": 15.366412358998412,
+      "rare_captured": 64
+     },
+     "rebuild_at_finalize": {
+      "krr_rmse_crit": 17.528502336102388,
+      "krr_rmse_all": 15.70932828353176,
+      "rare_captured": 70
+     }
+    },
+    {
+     "seed": 3,
+     "default": {
+      "krr_rmse_crit": 18.212260476875464,
+      "krr_rmse_all": 15.249093374159013,
+      "rare_captured": 68
+     },
+     "rebuild_at_finalize": {
+      "krr_rmse_crit": 17.01139714473772,
+      "krr_rmse_all": 15.512890818293165,
+      "rare_captured": 67
+     }
+    },
+    {
+     "seed": 4,
+     "default": {
+      "krr_rmse_crit": 18.703527239573692,
+      "krr_rmse_all": 15.255178592223244,
+      "rare_captured": 62
+     },
+     "rebuild_at_finalize": {
+      "krr_rmse_crit": 17.840305711561353,
+      "krr_rmse_all": 15.813184295092922,
+      "rare_captured": 76
+     }
+    }
+   ],
+   "summary": {
+    "default": {
+     "krr_rmse_crit": 19.138536665887507,
+     "krr_rmse_all": 15.366412358998412,
+     "rare_captured": 64.0
+    },
+    "rebuild_at_finalize": {
+     "krr_rmse_crit": 17.585192950644085,
+     "krr_rmse_all": 15.699011020392234,
+     "rare_captured": 73.0
+    }
+   },
+   "wilcoxon": {
+    "krr_rmse_crit": {
+     "wins_rebuild": 5,
+     "p_value": 0.0625,
+     "median_default": 19.138536665887507,
+     "median_rebuild": 17.585192950644085
+    },
+    "krr_rmse_all": {
+     "wins_rebuild": 0,
+     "p_value": 0.0625,
+     "median_default": 15.366412358998412,
+     "median_rebuild": 15.699011020392234
+    }
+   },
+   "elapsed_sec": 36.70222680000006
+  }
+ }
+}
