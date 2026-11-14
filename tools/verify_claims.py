@@ -671,6 +671,23 @@ for b in hard["by_batch"]:
     # partial windows are the weak spot: document it, do not hide it
     check_min(f"radar_hard B={b} partial_frac0.25 AUC >= 0.9", agg["partial_frac0.25"]["auc_median"], 0.9)
 
+# ------------------------------------- radar scoring-mode comparison (E1)
+# The combined radar (BW+mean-shift) closes the small-window partial-drift
+# weak spot and is more economical than the 8-term panel (2 terms >= 8).
+modes = load("bench_radar_modes_results.json")
+check_digest("radar_modes artifact digest", artifact_digest(modes), "9f216e3c444a4d3d14d4bf5522063903e4752e61b285fc9327f3cf8e76cb04ad")
+m64 = modes["by_batch"]["64"]["partial_0.25"]
+check("radar_modes B64 partial25 BW", m64["bw"], 0.9610, 0.002)
+check("radar_modes B64 partial25 combined", m64["combined"], 0.9968, 0.002)
+check("radar_modes B64 partial25 panel", m64["panel"], 0.9827, 0.002)
+check("radar_modes combined beats panel at weak spot", 1 if m64["combined"] > m64["panel"] else 0, 1, 0)
+check("radar_modes combined closes weak spot (>=0.99)", 1 if m64["combined"] >= 0.99 else 0, 1, 0)
+for b in modes["by_batch"]:
+    for name, row in modes["by_batch"][b].items():
+        check(f"radar_modes B={b} {name} combined >= bw", 1 if row["combined"] >= row["bw"] - 1e-9 else 0, 1, 0)
+check("radar_modes B256 partial25 all perfect", 1 if all(modes["by_batch"]["256"]["partial_0.25"][m] >= 0.999 for m in ("bw", "combined", "panel")) else 0, 1, 0)
+check_text_count("paper recommends combined radar", "recommend the combined radar", 1, PAPER)
+
 # ------------------------------------- v3.15.1 shipped global-guard artifact
 # The presets pm25_global / sparse_auto turn the global guard ON. Until
 # v3.15.1 no artifact measured the SHIPPED guard path (the PM2.5 'guard

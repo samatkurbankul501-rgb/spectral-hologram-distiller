@@ -1,0 +1,104 @@
+{
+ "dataset": "UCI Superconductivity",
+ "title": "Radar scoring-mode comparison: BW vs combined (BW+mean-shift) vs 8-term panel",
+ "n_seeds": 5,
+ "crystal_size": 200,
+ "train_cut": 20,
+ "note": "AUC median over 5 seeds; partial windows mix frac OOD rows. Combined closes the small-window partial-drift weak spot (B=64 partial_0.25: BW 0.961 -> combined 0.997); at B=256 all modes reach 1.0. Combined >= panel everywhere (2 terms more economical than 8).",
+ "by_batch": {
+  "64": {
+   "gradual_0.3": {
+    "bw": 0.9978354978354979,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "gradual_0.5": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "gradual_0.7": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "noisy_0.5": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "noisy_1.0": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "noisy_2.0": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "partial_0.25": {
+    "bw": 0.961038961038961,
+    "combined": 0.9967532467532468,
+    "panel": 0.9826839826839826
+   },
+   "partial_0.5": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "abrupt": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   }
+  },
+  "256": {
+   "gradual_0.3": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "gradual_0.5": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "gradual_0.7": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "noisy_0.5": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "noisy_1.0": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "noisy_2.0": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "partial_0.25": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "partial_0.5": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   },
+   "abrupt": {
+    "bw": 1.0,
+    "combined": 1.0,
+    "panel": 1.0
+   }
+  }
+ }
+}

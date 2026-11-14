@@ -362,12 +362,12 @@ The combined BW+mean-shift radar detects all four leaks at 0.70 unmatched false 
 \label{fig:metro}
 \end{figure}
 
-The radar's behaviour under graded, noisy, and partial drift is characterized separately on superconductivity (Figure~\ref{fig:radar}): AUC is 1.0 for abrupt, gradual, and noisy shifts, and 0.961 for the hardest partial-25\% regime --- the disclosed weak spot. The published single perfect detection point is thus an easy-task characterization, not a proof.
+The radar's behaviour under graded, noisy, and partial drift is characterized on superconductivity (Figure~\ref{fig:radar}). The BW-only radar leaves a small-window weak spot (B=64 partial-25\% AUC 0.961); the \emph{combined} radar (BW + mean-shift) closes it (AUC 0.997) and is more economical than the full 8-term panel (0.983), whose extra terms dilute the partial-drift signal --- two terms suffice. At B=256 every mode reaches 1.0. We therefore recommend the combined radar as the default detection mode (artifact: \texttt{bench\_radar\_modes\_results.json}).
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.7\textwidth]{figures/fig_radar.pdf}
-\caption{Radar ROC AUC under graded, noisy, and partial drift (superconductivity, B=64, 5 seeds; IQR bars; axis zoomed to $[0.90,1.0]$). All regimes $\ge 0.96$; partial-25\% (0.961) is the disclosed weak spot.}
+\caption{Radar ROC AUC under graded, noisy, and partial drift (superconductivity, B=64, 5 seeds). BW-only vs combined (BW+mean-shift). The combined radar closes the partial-25\% weak spot (0.961 $\to$ 0.997); all other regimes $\ge 0.998$. At B=256 all modes reach 1.0.}
 \label{fig:radar}
 \end{figure}
 
@@ -439,7 +439,7 @@ SHD is zero-GPU and bounded-memory; Table~\ref{tab:cost} reports the measured on
 
 \textbf{Trade-off Transparency:} SHD is an engineered trade-off: allocating dedicated Voronoi volume to rare regimes slightly degrades global background modeling ($0.546$ vs $0.425$ for $K$-Means background RMSE in the BO benchmark). Furthermore, on smooth Gaussian data lacking distinct phase transitions, $K$-Means achieves comparable global representation. SHD is specifically designed for multi-scale physical streams where extreme operational modes carry asymmetric utility.
 
-\textbf{Limitations.} (i) The reactor is synthetic; the second real stream (Beijing PM2.5, 3\% critical, Section~\ref{sec:pm25}) shows that the single-crystal default loses global RMSE, and the fix requires a critical-aware band plus a guard or bank rather than the single-crystal method. (ii) The radar separates strong abrupt shifts perfectly (AUC $=1.0$ on the abrupt benchmark); graded and noisy drift is characterized by a real ROC curve (Figure~\ref{fig:radar}; median AUC $>0.98$ even for the hardest partial regime), which shows the published single perfect point is an easy-task characterization, not a proof. (iii) The default blended passport can leave both domains above threshold; recalibration accepts the new domain but flags the old, and a domain bank accepts both (Section~\ref{sec:passport}). (iv) We provide no coverage guarantee; the method is empirical. (v) The 15-split data-access and stratification controls use a single dataset.
+\textbf{Limitations.} (i) The reactor is synthetic; the second real stream (Beijing PM2.5, 3\% critical, Section~\ref{sec:pm25}) shows that the single-crystal default loses global RMSE, and the fix requires a critical-aware band plus a guard or bank rather than the single-crystal method. (ii) The radar separates strong abrupt shifts perfectly (AUC $=1.0$); the BW-only radar has a small-window partial-drift weak spot (B=64 partial-25\% AUC 0.961) that the combined radar closes (0.997; Figure~\ref{fig:radar}, \texttt{bench\_radar\_modes\_results.json}). The published single perfect point is an easy-task characterization, not a proof. (iii) The default blended passport can leave both domains above threshold; recalibration accepts the new domain but flags the old, and a domain bank accepts both (Section~\ref{sec:passport}). (iv) We provide no coverage guarantee; the method is empirical. (v) The 15-split data-access and stratification controls use a single dataset.
 
 \textbf{Future Directions:} Immediate engineering priorities include compiling the Bures--Wasserstein radar into bare-metal C for ARM Cortex-M microcontrollers and deploying SHD within sovereign industrial telemetry pipelines. The NASA C-MAPSS FD001 benchmark, previously named here as future work, is now evaluated in Section~\ref{sec:cmapss}. Remaining scientific directions include a theory appendix (a herding MMD bound under the Voronoi prior and finite-sample Bures--Wasserstein concentration) and extending the scalability comparison to near-linear MMD coresets.
 
