@@ -57,6 +57,17 @@ To resolve these challenges simultaneously, we introduce the \textbf{Spectral Ho
     \item \textbf{Empirical Rigor:} Across 20 coreset-construction seeds (fixed 80/20 split) on the 81-dimensional UCI Superconductivity dataset \citep{hamidieh2018data} and a 4D phase-transition reactor, SHD demonstrates statistically significant superiority on the critical regime ($p < 10^{-5}$, paired Wilcoxon, Holm-corrected) over Random, $K$-Means, Kernel Thinning \citep{dwivedi2024kernel}, and Supervised Kernel Thinning \citep{gong2024supervised}; global metrics are competitive but not uniformly superior (SKT wins SC GBM-all by 0.09\,K, n.s.; $K$-Means wins reactor GBM-all by 0.03\,K, n.s.).
 \end{itemize}
 
+\section{Related Work}
+\label{sec:related}
+
+\textbf{MMD coresets and kernel thinning.} Kernel herding \citep{chen2010super} and practical coreset constructions \citep{bachem2017practical} compress a distribution by matching its kernel mean embedding; Kernel Thinning (KT) \citep{dwivedi2024kernel} and Supervised KT \citep{gong2024supervised} give near-optimal MMD coresets, and COMPRESS \citep{shetty2021compress} reduces the construction cost to near-linear time. Because MMD is dominated by dense probability mass, these methods allocate rare regimes roughly proportionally to their mass. SHD differs in objective: it reserves dedicated phase-manifold cells for the critical band and solves herding weights blended with tempered Voronoi volumes, trading a small amount of global MMD fidelity for decisive rare-regime accuracy (Section~\ref{sec:pm25}).
+
+\textbf{Streaming and scalable coresets.} The unified framework of \citet{feldman2011unified} and the streaming constructions of \citet{braverman2016streaming} provide worst-case approximation guarantees for clustering and regression with bounded memory. SHD shares the bounded-memory streaming goal ($O(k^2 + d)$ working memory) but targets a different contract: preserving extreme operational modes and shipping a self-contained spectral passport that detects its own obsolescence without the raw stream, rather than a uniform approximation guarantee.
+
+\textbf{Dataset distillation.} Gradient- and trajectory-matching distillation \citep{wang2018dataset} synthesizes artificial prototypes via bi-level optimization at a cost of hundreds of GPU-hours. SHD is zero-GPU, operates on streaming data with bounded memory, and retains real, physically realizable measurements as medoids.
+
+\textbf{Drift detection and continual learning.} Adaptive windowing (ADWIN) \citep{bifet2007adwin} and drift detection (DDM) \citep{gama2004ddm}, surveyed in \citet{gama2014survey}, flag distribution change on the raw stream; elastic weight consolidation \citep{kirkpatrick2017overcoming} regularizes network weights against forgetting. SHD's Bures--Wasserstein radar instead operates on the compressed spectral passport (no raw-data access), and healing edits the coreset surgically with bounded forgetting --- a data-space complement to weight-space continual learning.
+
 \section{The Spectral Hologram Distiller Architecture}
 
 \subsection{Dual-Scale Bochner Spectral Sketch}

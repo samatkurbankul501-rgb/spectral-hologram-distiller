@@ -444,7 +444,7 @@ PAPER_NEEDLE_COUNTS = {
     'SHD wins (KRR Crit)': 2,
     'passport\\_recalibrate': 2,
     'sec:passport': 4,
-    'sec:pm25': 5,
+    'sec:pm25': 6,
     'tab:passport': 2,
     'tab:pm25': 2,
 }
