@@ -488,7 +488,7 @@ README_NEEDLE_COUNTS = {
     '55.0': 5,
     '59.0': 1,
     '85.3': 1,
-    '993.0': 3,
+    '993.0': 2,
     'DomainBank': 8,
     'PM2.5': 16,
     'passport_recalibrate': 4,

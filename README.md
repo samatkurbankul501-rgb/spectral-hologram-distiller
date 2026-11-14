@@ -1,5 +1,15 @@
 # Spectral Hologram Distiller (SHD v3.15.2)
 
+> **2026-11-14 Scania tuned-C regen (20 seeds, shipped):** the 10:1 tuned-logit
+> artifact was regenerated at 20 seeds (was 10). The SHD tuned-logit advantage
+> over Random is now significant (17/20, p=0.0025; was 8/10, p=0.0625 n.s.),
+> resolving the "10 seeds cannot make that claim" caveat for that comparison;
+> vs K-Means logit it is borderline (14/20, p=0.05; ~40 seeds to settle). HGB
+> baselines: vs Random 16/20 p=0.00073, vs K-Means 17/20 p=0.00059. Median
+> tuned-logit cost 873.0 (was 840.5). README §8 updated; the 500:10 official
+> artifact is unchanged. A bootstrap power analysis had predicted ~84% power
+> vs Random at 20 seeds — confirmed.
+
 > **2026-11-13 Banner hunt (confirmed, shipped):** a full-codebase bug hunt
 > (probe-first, one regression per defect) found three defects and one waste:
 > (U) auto-band crystals persisted the RAW high_band_ratio, so the loader's
@@ -980,7 +990,7 @@ and fresh validation on the target equipment.
 
 **Why the historical logit arm failed — and the tuned rerun (v3.14.1).** The
 logit rows above use the sklearn default `C=1.0`. Validation-tuning `C` on a
-held-out slice (grid 0.01–10.0; 10 seeds; artifact
+held-out slice (grid 0.01–10.0; 20 seeds; artifact
 `bench_scania_cost_tunedC_results.json`) strengthens the regularization by
 two orders of magnitude and turns SHD+logit into the best hand of the 10:1
 cost scenario (cost table below): the crystal was never the
@@ -992,20 +1002,21 @@ committed artifact and have been removed.) Rerun with
 
 | Coreset (300 rows) | Model | Failures missed | False alarms | Recall | Precision | Cost = 10·FN + 1·FP |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| Random | logit | 57.5 | 418.5 | 0.847 | 0.425 | 974.5 |
-| K-Means | logit | 47.5 | 385.5 | 0.873 | 0.432 | 914.0 |
-| **SHD** | **tuned logit** | **49.5** | 330.0 | **0.868** | 0.497 | **840.5** |
+| Random | logit | 57.5 | 418.5 | 0.847 | 0.417 | 1058.0 |
+| K-Means | logit | 50.0 | 398.5 | 0.867 | 0.433 | 941.0 |
+| **SHD** | **tuned logit** | **58.5** | **318.0** | **0.844** | 0.502 | **873.0** |
 
-Tuned logit beats tuned HGB on the same crystals (840.5 vs 993.0) and every
+Tuned logit beats tuned HGB on the same crystals (873.0 vs 983.5) and every
 logit arm improves over its historical-`C` self — against the historical SHD
-row the tuned hand cuts the cost by 40.8% (1419.0 → 840.5) while recall rises
-0.679 → 0.868. The honest caveat: with 10 seeds the paired wins over Random
-(8/10, $p=0.0625$) and K-Means (7/10, $p=0.16$) are **not significant** — the
-medians rank SHD first, but 10 seeds cannot make that claim; only the
-HGB-baseline comparisons stay significant (8/10, $p=0.0195$). The
-crystal-positive mechanism is unchanged (median 25.0 SHD positives vs
-7.0/7.5). Do not sell the logit improvement as a significant superiority over
-the baselines.
+row the tuned hand cuts the cost by 38.5% (1419.0 → 873.0) while recall rises
+0.679 → 0.844. With 20 seeds (2026-11-14 regen) the paired win over Random is
+now **significant** (17/20, $p=0.0025$); against K-Means it is borderline
+(14/20, $p=0.05$) — ~40 seeds would settle it. The HGB-baseline comparisons
+are significant (vs Random 16/20, $p=0.00073$; vs K-Means 17/20, $p=0.00059$).
+The crystal-positive mechanism is unchanged (median 25.0 SHD positives vs
+5.0/8.0). The earlier 10-seed caveat ("10 seeds cannot make that claim") is
+resolved for the Random comparison by this regen; do not sell the K-Means
+logit gap as significant until ~40 seeds confirm it.
 
 Source of truth: `bench_scania_cost_results.json`; the table above is generated
 from it by `make_scania_table.py`.
@@ -1063,7 +1074,7 @@ can. Paired Wilcoxon on the tuned run: SHD vs Random (HGB) **9/10 wins,
 $p=0.0039$**; SHD vs K-Means (HGB) **9/10 wins, $p=0.0039$**; tuned-logit
 comparisons are not significant (5/10, $p=0.43$; 3/10, $p=0.49$). The two
 sides of the story must be quoted together: 10:1 — tuned logit is the best
-hand (840.5); 500:10 — HGB remains the stronger learner on the SHD crystal.
+hand (873.0); 500:10 — HGB remains the stronger learner on the SHD crystal.
 
 ### 9. Early warning on a real metro compressor (`shd_watch.py`, `bench_metro_watch.py`)
 
