@@ -70,6 +70,13 @@ To resolve these challenges simultaneously, we introduce the \textbf{Spectral Ho
 
 \section{The Spectral Hologram Distiller Architecture}
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_pipeline.pdf}
+\caption{SHD pipeline. A streaming batch is projected into a dual-scale Bochner RFF sketch with online accumulators $\Psi,\Phi$; a residual/leverage trigger flags phase-peak candidates; a Voronoi lattice on the phase manifold $[Z\,\|\,\kappa y]$ snaps to real medoids; FISTA herding blended with tempered Voronoi volumes gives the coreset weights. The crystal ships a 16-bit spectral passport whose Bures--Wasserstein radar flags drift without raw data, and healing injects new medoids with bounded forgetting. Zero-GPU, $O(k^2+d)$ working memory.}
+\label{fig:pipeline}
+\end{figure}
+
 \subsection{Dual-Scale Bochner Spectral Sketch}
 Given an incoming continuous stream of $d$-dimensional feature vectors $\mathbf{x}_t \in \mathbb{R}^d$ and targets $y_t \in \mathbb{R}$, SHD first normalizes features with statistics fixed at the first batch (target statistics can optionally adapt); the warm-up buffer is capped at 8,192 rows. To capture both smooth global manifolds and high-frequency critical transitions, we construct a randomized feature map $\phi: \mathbb{R}^d \to \mathbb{R}^k$ via Bochner's theorem \citep{rahimi2007random}.
 
@@ -324,6 +331,46 @@ Oracle (KRR 9,000; GBM full) & 13.05 & 17.49 & 16.99 & 18.23 & --- \\
 
 At the critical preset br=0.65 the gamma-weighted crystal beats all four baselines on near-failure GBM RMSE (13--17/20 seeds, $p \le 1.1\times10^{-2}$) and beats Random/KT/SKT on near-failure KRR RMSE (12--16/20, $p \le 2.7\times10^{-2}$) while tying $K$-Means (12/20, n.s.). The uniform-weight variant of the same crystal improves KRR critical (13.81 vs 14.54) but not GBM (13.95 vs 13.61): on this low-tail task the weighting choice is model-dependent. No arm beats the KRR oracle on the critical regime (best median 13.45 at br=0.50 uniform versus 13.05, 7/20 seeds), while the GBM full-pool oracle is beaten (16--19/20); no arm beats either oracle on the global fit (0/20). The global cost is real: br=0.65 KRR-all 21.38 versus 19.57 for SKT. The band-ratio optimum is metric- and model-dependent (br=0.50 is KRR-best), repeating the operating-point lesson of Section~\ref{sec:pm25} on a third real dataset.
 
+\subsection{Early Warning on a Real Metro Compressor (MetroPT-3)}
+\label{sec:metro}
+The industrial motivation of the introduction is tested on the MetroPT-3 air-production-unit compressor stream \citep{veloso2022metropt}: 252,720 minutes of real telemetry with four labelled air leaks (April--July 2020). Protocol v2 learns Feb~1--Mar~15, calibrates the false-alarm budget on Mar~15--Apr~10, and watches Apr~10--Aug~1 (112 days, 2.87 observed-exposure months). All arms share complete contiguous 60-minute windows, 30-minute steps, a 6-hour episode cooldown, and a 1.0 false-alarm/month calibration budget; missing minutes break windows, and a separate max-alert fraction prevents sustained alarms from gaming episode counts. These are empirical calibration constraints, not future false-alarm guarantees. Table~\ref{tab:metro} and Figure~\ref{fig:metro} report the result.
+
+\begin{table}[t]
+\centering
+\small
+\caption{MetroPT-3 early warning (protocol v2; 112-day watch, 1.0 FA/month budget). Lead times in days; FA/month over observed exposure.}
+\label{tab:metro}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Detector} & \textbf{Leaks} & \textbf{Lead times (days)} & \textbf{FA/mo} & \textbf{Episodes} \\
+\midrule
+SHD passport (BW only), detrended & 0/4 & --- & 0.00 & 0 \\
+SHD passport, raw & 0/4 & --- & 0.00 & 0 \\
+Feature-z, detrended & 4/4 & 5.5 / 16.4 / 17.3 / 6.8 & 1.74 & 15 \\
+IsolationForest, detrended & 2/4 & 16.4 / 16.4 & 0.00 & 2 \\
+\textbf{SHD radar (BW+mean-shift)} & \textbf{4/4} & 5.5 / 16.4 / 18.2 / 0.0 & \textbf{0.70} & 13 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The combined BW+mean-shift radar detects all four leaks at 0.70 unmatched false alarms per observed month --- inside the 1.0 budget --- with leads of 5.5 to 18.2 days (leak \#4 is caught on the day it starts). The pure spectral passport (BW only) is silent (0/4): the leak signature is a mean shift the second-moment BW term misses, and the mean-shift component carries the signal. The feature-z baseline also detects 4/4 but at 1.74 FA/month, exceeding the budget; IsolationForest detects 2/4. The crystal is 55.5 KB (learn 6.2 s, watch scan 36.8 s). This is the rotating-machinery evidence for the industrial framing: a compressed, self-contained radar that matches the best baseline's detection at less than half its alarm rate.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/fig_metro.pdf}
+\caption{MetroPT-3 per-leak lead times (hours). The combined SHD radar matches feature-z detection (4/4) at 0.70 vs 1.74 FA/month (budget 1.0); leak \#4 is caught on the incident day (lead 0). IsolationForest detects 2/4 (not shown). Single labelled incident series; FA over observed exposure.}
+\label{fig:metro}
+\end{figure}
+
+The radar's behaviour under graded, noisy, and partial drift is characterized separately on superconductivity (Figure~\ref{fig:radar}): AUC is 1.0 for abrupt, gradual, and noisy shifts, and 0.961 for the hardest partial-25\% regime --- the disclosed weak spot. The published single perfect detection point is thus an easy-task characterization, not a proof.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.7\textwidth]{figures/fig_radar.pdf}
+\caption{Radar ROC AUC under graded, noisy, and partial drift (superconductivity, B=64, 5 seeds; IQR bars; axis zoomed to $[0.90,1.0]$). All regimes $\ge 0.96$; partial-25\% (0.961) is the disclosed weak spot.}
+\label{fig:radar}
+\end{figure}
+
 \subsection{Hyperparameter Sensitivity and Ablation}
 
 Every architectural constant is exposed as a constructor argument, so sensitivity
@@ -354,17 +401,25 @@ Critical-regime KRR RMSE, lower is better. Bold = published default. 5-seed medi
 \end{tabular}
 \end{table}
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_frontier.pdf}
+\caption{Operating-point frontier (M=600, 20 seeds, fixed split): critical KRR RMSE falls and global KRR RMSE rises as the phase-peak band widens. Dashed: equal-budget K-Means; dotted: oracle. On superconductivity the br=0.65 crystal beats the KRR oracle on the critical regime; the global cost is the trade-off.}
+\label{fig:frontier}
+\end{figure}
+
 Two conclusions follow. First, the published defaults are conservative rather than
 tuned-to-death: per-dataset tuning yields up to $\sim$19\% better critical RMSE
 (e.g.\ \texttt{high\_band\_ratio}${=}0.5$ or \texttt{tail\_quantile}${=}94$), which
 is expected for a coreset method and should be performed on validation data.
+The band-ratio frontier at M=600 (Figure~\ref{fig:frontier}) makes the trade-off explicit.
 Second, \texttt{phase\_kappa} is the structural constant (removal costs $0.85\,\mathrm{K}$), but it is not the only sensitive one: \texttt{high\_band\_ratio}$=0.10$ costs $1.09\,\mathrm{K}$. We recommend keeping $\kappa>0$ and tuning the band width on validation data. The ablation uses 5 seeds; a 10-seed CI replication is reported in the repository.
 
 \section{Discussion, Limitations, and Future Work}
 
 \textbf{Trade-off Transparency:} SHD is an engineered trade-off: allocating dedicated Voronoi volume to rare regimes slightly degrades global background modeling ($0.546$ vs $0.425$ for $K$-Means background RMSE in the BO benchmark). Furthermore, on smooth Gaussian data lacking distinct phase transitions, $K$-Means achieves comparable global representation. SHD is specifically designed for multi-scale physical streams where extreme operational modes carry asymmetric utility.
 
-\textbf{Limitations.} (i) The reactor is synthetic; the second real stream (Beijing PM2.5, 3\% critical, Section~\ref{sec:pm25}) shows that the single-crystal default loses global RMSE, and the fix requires a critical-aware band plus a guard or bank rather than the single-crystal method. (ii) The radar separates strong abrupt shifts perfectly (AUC $=1.0$ on the abrupt benchmark); graded and noisy drift is characterized by a real ROC curve in the repository (median AUC $>0.98$ even for the hardest 20-30 K band), which shows the published single perfect point is an easy-task characterization, not a proof. (iii) The default blended passport can leave both domains above threshold; recalibration accepts the new domain but flags the old, and a domain bank accepts both (Section~\ref{sec:passport}). (iv) We provide no coverage guarantee; the method is empirical. (v) The 15-split data-access and stratification controls use a single dataset.
+\textbf{Limitations.} (i) The reactor is synthetic; the second real stream (Beijing PM2.5, 3\% critical, Section~\ref{sec:pm25}) shows that the single-crystal default loses global RMSE, and the fix requires a critical-aware band plus a guard or bank rather than the single-crystal method. (ii) The radar separates strong abrupt shifts perfectly (AUC $=1.0$ on the abrupt benchmark); graded and noisy drift is characterized by a real ROC curve (Figure~\ref{fig:radar}; median AUC $>0.98$ even for the hardest partial regime), which shows the published single perfect point is an easy-task characterization, not a proof. (iii) The default blended passport can leave both domains above threshold; recalibration accepts the new domain but flags the old, and a domain bank accepts both (Section~\ref{sec:passport}). (iv) We provide no coverage guarantee; the method is empirical. (v) The 15-split data-access and stratification controls use a single dataset.
 
 \textbf{Future Directions:} Immediate engineering priorities include compiling the Bures--Wasserstein radar into bare-metal C for ARM Cortex-M microcontrollers and deploying SHD within sovereign industrial telemetry pipelines. The NASA C-MAPSS FD001 benchmark, previously named here as future work, is now evaluated in Section~\ref{sec:cmapss}. Remaining scientific directions include a theory appendix (a herding MMD bound under the Voronoi prior and finite-sample Bures--Wasserstein concentration) and extending the scalability comparison to near-linear MMD coresets.
 

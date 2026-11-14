@@ -469,7 +469,9 @@ for text in [
 
 for needle in [
     r"zero catastrophic", r"strictly preserved", r"M = 90",
-    r"state-of-the-art", r"22.90", r"21.41", r"56.0", r"55.5",
+    # "55.5" is the LIVE MetroPT-3 crystal size (pinned positively below from
+    # bench_metro_watch_v2_results.json), so it is not forbidden in the paper.
+    r"state-of-the-art", r"22.90", r"21.41", r"56.0",
     r"8.7\%", r"whitened", r"phase-weighted", r"diag(",
     r"solved online", r"B / n_seen", r"higher phase score",
     r"cannot be pruned", r"the KRR oracle is not beaten on this dataset",

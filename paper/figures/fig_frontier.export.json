@@ -1,0 +1,48 @@
+{
+  "notice": "Export completed with explicit settings. This report does not establish visual, accessibility, scientific-integrity, or journal-submission compliance.",
+  "outputs": [
+    {
+      "format": "pdf",
+      "kind": "vector-container",
+      "path": "C:\\Users\\User\\Downloads\\New folder\\_release\\spectral-hologram-distiller\\paper\\figures\\fig_frontier.pdf",
+      "size_bytes": 32603
+    },
+    {
+      "format": "png",
+      "kind": "raster",
+      "path": "C:\\Users\\User\\Downloads\\New folder\\_release\\spectral-hologram-distiller\\paper\\figures\\fig_frontier.png",
+      "size_bytes": 399709
+    }
+  ],
+  "provenance": {
+    "missing_data": "none",
+    "raw_data": "bench_frontier_results.json",
+    "transformations": [
+      "per-ratio median over 20 seeds"
+    ],
+    "uncertainty": "median of 20 coreset seeds; fixed split"
+  },
+  "schema_version": "1.0",
+  "settings": {
+    "bbox_inches": null,
+    "dpi": 600.0,
+    "facecolor": "white",
+    "figure_size_inches": [
+      7.086614173228347,
+      4.724409448818898
+    ],
+    "font_mode": "truetype",
+    "formats": [
+      "pdf",
+      "png"
+    ],
+    "pad_inches": 0.1,
+    "tiff_rgb": false,
+    "transparent": false
+  },
+  "versions": {
+    "matplotlib": "3.11.2",
+    "pillow": "13.0.0"
+  },
+  "warnings": []
+}

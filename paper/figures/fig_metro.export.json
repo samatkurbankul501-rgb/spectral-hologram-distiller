@@ -1,0 +1,48 @@
+{
+  "notice": "Export completed with explicit settings. This report does not establish visual, accessibility, scientific-integrity, or journal-submission compliance.",
+  "outputs": [
+    {
+      "format": "pdf",
+      "kind": "vector-container",
+      "path": "C:\\Users\\User\\Downloads\\New folder\\_release\\spectral-hologram-distiller\\paper\\figures\\fig_metro.pdf",
+      "size_bytes": 34215
+    },
+    {
+      "format": "png",
+      "kind": "raster",
+      "path": "C:\\Users\\User\\Downloads\\New folder\\_release\\spectral-hologram-distiller\\paper\\figures\\fig_metro.png",
+      "size_bytes": 138122
+    }
+  ],
+  "provenance": {
+    "missing_data": "lead 0 = detected on incident day",
+    "raw_data": "bench_metro_watch_v2_results.json",
+    "transformations": [
+      "per-leak lead hours; 60-min windows, 30-min step, 6h cooldown"
+    ],
+    "uncertainty": "single labelled incident series (4 leaks); FA over observed exposure"
+  },
+  "schema_version": "1.0",
+  "settings": {
+    "bbox_inches": null,
+    "dpi": 600.0,
+    "facecolor": "white",
+    "figure_size_inches": [
+      3.5039370078740157,
+      2.7559055118110236
+    ],
+    "font_mode": "truetype",
+    "formats": [
+      "pdf",
+      "png"
+    ],
+    "pad_inches": 0.1,
+    "tiff_rgb": false,
+    "transparent": false
+  },
+  "versions": {
+    "matplotlib": "3.11.2",
+    "pillow": "13.0.0"
+  },
+  "warnings": []
+}

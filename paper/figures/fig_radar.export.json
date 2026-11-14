@@ -1,0 +1,49 @@
+{
+  "notice": "Export completed with explicit settings. This report does not establish visual, accessibility, scientific-integrity, or journal-submission compliance.",
+  "outputs": [
+    {
+      "format": "pdf",
+      "kind": "vector-container",
+      "path": "C:\\Users\\User\\Downloads\\New folder\\_release\\spectral-hologram-distiller\\paper\\figures\\fig_radar.pdf",
+      "size_bytes": 32324
+    },
+    {
+      "format": "png",
+      "kind": "raster",
+      "path": "C:\\Users\\User\\Downloads\\New folder\\_release\\spectral-hologram-distiller\\paper\\figures\\fig_radar.png",
+      "size_bytes": 147964
+    }
+  ],
+  "provenance": {
+    "missing_data": "none",
+    "note": "x-axis zoomed to [0.90,1.0]; all regimes >=0.96",
+    "raw_data": "bench_radar_hard_results.json",
+    "transformations": [
+      "median AUC over 5 seeds, B=64"
+    ],
+    "uncertainty": "IQR over 5 seeds (n=5)"
+  },
+  "schema_version": "1.0",
+  "settings": {
+    "bbox_inches": null,
+    "dpi": 600.0,
+    "facecolor": "white",
+    "figure_size_inches": [
+      3.5039370078740157,
+      3.1496062992125986
+    ],
+    "font_mode": "truetype",
+    "formats": [
+      "pdf",
+      "png"
+    ],
+    "pad_inches": 0.1,
+    "tiff_rgb": false,
+    "transparent": false
+  },
+  "versions": {
+    "matplotlib": "3.11.2",
+    "pillow": "13.0.0"
+  },
+  "warnings": []
+}
