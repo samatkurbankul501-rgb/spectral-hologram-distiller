@@ -42,6 +42,8 @@ def run(seeds):
     loaders = {"reactor": load_reactor, "superconduct": load_superconduct}
     for name, loader in loaders.items():
         X, y, crit, title = loader()
+        if name == "superconduct" and X.shape[1] != 81:
+            raise RuntimeError("UCI superconduct fetch failed (California fallback); aborting")
         cm_threshold = crit
         X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.20, random_state=42)
         cm = y_te >= crit

@@ -692,14 +692,17 @@ check_text_count("paper recommends combined radar", "recommend the combined rada
 # The default interval=0 online-only lattice under-captures critical rows;
 # a single finalize-time rebuild (opt-in) recovers critical accuracy.
 rebuild = load("bench_rebuild_at_finalize_results.json")
-check_digest("rebuild_at_finalize artifact digest", artifact_digest(rebuild), "0d700ee790bb716c27fdf6b13f8fd54c7d96895060295d2680c4e63be5755257")
-_rb_crit = {"reactor": (3.3458, 2.4952), "superconduct": (19.1385, 17.5852)}
+check_digest("rebuild_at_finalize artifact digest", artifact_digest(rebuild), "94674c0396dff8127b24c5896d5cc23da089a4c6d4e9fc2d365ca5cb1656b9ae")
+check("rebuild_at_finalize 20 seeds", rebuild["n_seeds"], 20, 0)
+_rb_crit = {"reactor": (3.4364, 2.6229), "superconduct": (18.8053, 17.5603)}
 for ds, (dc, rc) in _rb_crit.items():
     s = rebuild["datasets"][ds]["summary"]
+    w = rebuild["datasets"][ds]["wilcoxon"]["krr_rmse_crit"]
     check(f"rebuild {ds} default crit", s["default"]["krr_rmse_crit"], dc, 0.001)
     check(f"rebuild {ds} rebuild crit", s["rebuild_at_finalize"]["krr_rmse_crit"], rc, 0.001)
     check(f"rebuild {ds} improves crit", 1 if s["rebuild_at_finalize"]["krr_rmse_crit"] < s["default"]["krr_rmse_crit"] else 0, 1, 0)
     check(f"rebuild {ds} more rare", 1 if s["rebuild_at_finalize"]["rare_captured"] > s["default"]["rare_captured"] else 0, 1, 0)
+    check(f"rebuild {ds} crit significant (p<0.05)", 1 if w["p_value"] < 0.05 else 0, 1, 0)
 check_text_count("readme documents rebuild suppressor", "rebuild_at_finalize=True", 1, README)
 
 # ------------------------------------- v3.15.1 shipped global-guard artifact

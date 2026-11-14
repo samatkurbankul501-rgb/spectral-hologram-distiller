@@ -6,9 +6,9 @@
 > arriving after warm-up, leaving critical accuracy on the table. A single
 > finalize-time rebuild from the whole-stream reservoir
 > (`rebuild_at_finalize=True`, preset `critical_rebuild`) recovers it:
-> reactor crit 3.346 -> 2.495 (-25%, beats the 2.78 oracle), SC 19.14 ->
-> 17.585 (-8.1%, matches the 17.59 oracle); rare capture 18 -> 35 (reactor),
-> 64 -> 73 (SC), 5/5 wins both (p=0.0625, the n=5 Wilcoxon floor). Cost:
+> reactor crit 3.436 -> 2.623 (-23.7%, beats the 2.78 oracle), SC 18.805 ->
+> 17.560 (-6.6%, matches the 17.59 oracle); rare capture 19.5 -> 34 (reactor),
+> 64.5 -> 73 (SC), 20/20 (p=2e-6) and 18/20 (p=1.9e-5), 20 seeds. Cost:
 > global +3-4%. Opt-in: the default interval=0 path stays bit-for-bit
 > (artifact: `bench_rebuild_at_finalize_results.json`).
 
