@@ -1,5 +1,26 @@
 # Spectral Hologram Distiller (SHD v3.15.2)
 
+> **2026-11-18 hunt finding Y2 (shipped):** `HologramCrystalLoader.save()` dropped
+> the finding-Y temporal dx statistics (`dx_mean`/`dx_std`) and the finding-U band
+> keys (`auto_band_ratio`/`effective_band_ratio`), so `heal -> save -> reload`
+> (CLI `shd heal`) and plain `load -> save` (CLI `shd migrate`) silently reverted a
+> delta crystal to the count-ordered medoid dx scale --- measured **4.32x**
+> trend-alarm desensitization on an identical window (mean-shift 3.2918 -> 0.7623).
+> `save()` now persists both: a re-saved crystal keeps the radar sensitivity and
+> band quota it was distilled with (probe desensitization 1.00). The distiller's
+> `save_hologram()` path and every published artifact are untouched; `shd_watch.py`
+> only calls `save_hologram`. Regression: `tests/test_bughunt_2026_11_18.py`
+> (4 tests). Suite 277 -> 281, gate 586. Also synced the `ARTIFACTS.md` Scania
+> tuned-C row to the 20-seed artifact (873.0/983.5/941.0; was the superseded
+> 10-seed 840.5/993.0/914.0).
+
+> **2026-11-15 state:** claim gate **586 checks**, suite **277 tests**, 0 failures.
+> A second suppressor hunt (first-batch X normalization, reservoir count bias,
+> FISTA cell-mean identity, MetroPT-3 batch-0 std collapse, portfolio gate
+> membership label) ruled out all five as free wins --- the shipped operating
+> points sit at genuine Pareto optima; correcting any of them trades critical
+> for global rather than raising both. Default path bit-for-bit unchanged.
+
 > **2026-11-14 suppressor hunt (opt-in fix shipped):** the default
 > `lattice_rebuild_interval=0` builds the lattice on the warm-up window and
 > only nudges centres online --- it cannot create critical cells for rows

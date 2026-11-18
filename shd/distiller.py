@@ -3784,6 +3784,20 @@ class HologramCrystalLoader:
                 dtype=np.float64,
             ),
         )
+        # 2026-11-18 (hunt finding Y2): save() used to drop the finding-Y temporal
+        # dx statistics and the finding-U band keys, so heal->save->reload (CLI
+        # heal) and load->save (CLI migrate) silently reverted a delta crystal to
+        # the count-ordered medoid dx scale -- measured 4.32x trend-alarm
+        # desensitization on an identical window. Persist them so a re-saved
+        # crystal keeps the radar sensitivity and band quota it was distilled
+        # with. Optional keys: legacy loaders ignore them, schema stays 1.
+        if self.include_deltas and self.dx_mean_ is not None and self.dx_std_ is not None:
+            payload["dx_mean"] = self.dx_mean_.astype(np.float32)
+            payload["dx_std"] = self.dx_std_.astype(np.float32)
+        payload["auto_band_ratio"] = np.array(bool(self.auto_band_ratio))
+        payload["effective_band_ratio"] = np.array(
+            [float(self.high_band_ratio)], dtype=np.float64
+        )
         # v3.15.2: keep the operating point when a healed crystal is
         # re-saved (the heal does not change it).
         if getattr(self, "tail_quantile", None) is not None:
