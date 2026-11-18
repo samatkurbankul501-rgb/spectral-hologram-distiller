@@ -167,14 +167,33 @@ def window_bounds(minutes, win, step):
             yield start, start + win
 
 
-def window_scores(loader, X, win, step, *, minutes):
-    """Return (end-row indices, BW scores) for contiguous timestamped windows."""
+RADAR_SCORE_KEY = {"bw": "bw_distance", "combined": "combined_distance",
+                   "panel": "panel_distance"}
+
+
+def window_scores(loader, X, win, step, *, minutes, radar="bw"):
+    """Return (end-row indices, radar scores) for contiguous timestamped windows.
+
+    ``radar`` selects the detector: "bw" (the spectral passport alone, the
+    historical default), "combined" (BW + mean-shift, the v3.13.0 radar that
+    detects the MetroPT-3 leaks the BW-only passport misses) or "panel" (the
+    8-term fused score). The choice is part of the threshold contract: calibrate
+    records it and watch replays the same detector. Scores are the raw distances
+    (adaptive_threshold=False); the EWMA/budget calibration downstream is
+    detector-agnostic.
+    """
+    if radar not in RADAR_SCORE_KEY:
+        raise ValueError(f"radar must be one of {sorted(RADAR_SCORE_KEY)}, got {radar!r}")
+    key = RADAR_SCORE_KEY[radar]
     minutes = _minute_axis(minutes, len(X))
     ends, scores = [], []
     for lo, hi in window_bounds(minutes, win, step):
-        rep = loader.check_domain_shift(X[lo:hi], adaptive_threshold=False)
+        rep = loader.check_domain_shift(
+            X[lo:hi], adaptive_threshold=False,
+            mean_shift=(radar == "combined"), panel=(radar == "panel"),
+        )
         ends.append(hi - 1)
-        scores.append(float(rep["bw_distance"]))
+        scores.append(float(rep[key]))
     return np.asarray(ends, dtype=np.int64), np.asarray(scores, dtype=np.float64)
 
 
@@ -396,6 +415,10 @@ def main(argv=None):
     p_cal.add_argument("--window-min", type=int, default=60)
     p_cal.add_argument("--step-min", type=int, default=30)
     p_cal.add_argument("--cooldown-h", type=float, default=6.0)
+    p_cal.add_argument("--radar", choices=("bw", "combined", "panel"), default="bw",
+                       help="detector to calibrate: bw (passport only, default), "
+                            "combined (BW + mean-shift, detects the MetroPT leaks), "
+                            "panel (8-term fused score)")
     p_cal.add_argument("--out", required=True)
 
     p_watch = sub.add_parser("watch", help="replay and alarm")
@@ -413,6 +436,9 @@ def main(argv=None):
                          help="override the calibrated step (default: threshold JSON)")
     p_watch.add_argument("--incidents", default=None,
                          help="JSON file with labelled incidents")
+    p_watch.add_argument("--radar", choices=("bw", "combined", "panel"), default=None,
+                         help="override the calibrated detector (default: threshold "
+                              "JSON); changing it requires re-running calibrate")
 
     args = ap.parse_args(argv)
     if bool(args.npz) == bool(args.csv):
@@ -453,7 +479,7 @@ def main(argv=None):
                      "metro_cache.py) or --csv together with --tcol and --columns")
         lo, hi = slice_range(minutes, args.t_from, args.t_to)
         idx, scores = window_scores(loader, X[lo:hi], args.window_min, args.step_min,
-                                     minutes=minutes[lo:hi])
+                                     minutes=minutes[lo:hi], radar=args.radar)
         sm = minutes[lo:hi][idx]
         if len(scores) == 0:
             sys.exit("no complete windows in the calibration slice; "
@@ -477,6 +503,7 @@ def main(argv=None):
                    "cooldown_h": args.cooldown_h,
                    "halflife_days": HALFLIFE_D,
                    "detrended": True,
+                   "radar": args.radar,
                    "baseline_end": float(b_end),
                    "calibration_episodes": int(n_eps),
                    "calibration_from": args.t_from, "calibration_to": args.t_to}
@@ -504,6 +531,11 @@ def main(argv=None):
             override = getattr(args, key)
             if override is not None and override != int(cfg[key]):
                 sys.exit("changing calibrated window/step requires re-running calibrate")
+        # The detector is part of the threshold contract too. Legacy v2 files
+        # predate the field and were BW-only, so they default to "bw".
+        cfg_radar = cfg.get("radar", "bw")
+        if args.radar is not None and args.radar != cfg_radar:
+            sys.exit("changing calibrated radar requires re-running calibrate")
         # The calibrated window and cadence are part of the threshold contract.
         win = (int(args.window_min) if args.window_min is not None
                else int(cfg.get("window_min", 60)))
@@ -525,7 +557,7 @@ def main(argv=None):
             sys.exit("feature order differs from calibration; re-run calibrate")
         if np.datetime64(args.t_from, "m") < np.datetime64(cfg["calibration_to"], "m"):
             sys.exit("watch must start after the calibration slice")
-        idx, scores = window_scores(loader, Xw, win, step, minutes=mw)
+        idx, scores = window_scores(loader, Xw, win, step, minutes=mw, radar=cfg_radar)
         sm = mw[idx]
         if not len(scores):
             sys.exit("no complete contiguous windows in the watch slice")
@@ -540,6 +572,7 @@ def main(argv=None):
             "windows": int(len(scores)), "episodes": len(eps),
             "tau": tau,
             "detrended": detrended,
+            "radar": cfg_radar,
             "window_min": win, "step_min": step,
             "scan_sec": round(time.perf_counter() - t0, 1),
             "alerts": [{"start": str(a), "end": str(b), "peak_bw": round(p, 4)}

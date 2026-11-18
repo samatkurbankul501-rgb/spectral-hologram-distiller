@@ -2799,12 +2799,40 @@ class HologramCrystalLoader:
                 res["mean_shift_distance"] = ms
                 res["combined_distance"] = combined
                 res["combined_threshold"] = float(ms_thr)
-                res["combined_threshold_source"] = (
-                    "calibrated"
-                    if adaptive_threshold and self.ms_tau_calibrated is not None
-                    else "default"
+                combined_calibrated = bool(
+                    adaptive_threshold and self.ms_tau_calibrated is not None
                 )
-                res["is_shifted"] = combined > ms_thr
+                res["combined_threshold_source"] = (
+                    "calibrated" if combined_calibrated
+                    else ("uncalibrated" if adaptive_threshold else "default")
+                )
+                if combined_calibrated:
+                    res["combined_is_shifted"] = bool(combined > ms_thr)
+                    res["is_shifted"] = bool(combined > ms_thr)
+                else:
+                    # 2026-11-18 (hunt finding D3): the combined score sums the BW
+                    # distance and a mean-shift z-score, but the uncalibrated
+                    # threshold is the BW-only constant -- the same apples+oranges
+                    # mismatch the panel guard (v3.15.1) addresses. Measured: 26/30
+                    # healthy in-distribution windows false-alarmed under the
+                    # default constant. Without a combined calibration the verdict
+                    # is unusable: report it as unknown and keep the BW verdict,
+                    # exactly like the panel path. adaptive_threshold=False is an
+                    # explicit opt-in to the raw constant (source "default"), so it
+                    # is not warned about, but its combined verdict is still unknown.
+                    if adaptive_threshold:
+                        warnings.warn(
+                            "mean_shift=True without a combined calibration: the "
+                            "combined score sums BW + a mean-shift z-score while "
+                            "the default threshold is the BW-only constant, so the "
+                            "combined verdict is unusable -- combined_is_shifted is "
+                            "reported as None and is_shifted keeps the BW verdict. "
+                            "Calibrate the combined radar on healthy windows "
+                            "(calibrate_threshold_ms) before using it.",
+                            UserWarning, stacklevel=2,
+                        )
+                    res["combined_is_shifted"] = None
+                    res["is_shifted"] = bool(bw_dist > thr)
             else:
                 res["is_shifted"] = bw_dist > thr
             if panel or e_process:
@@ -2864,7 +2892,6 @@ class HologramCrystalLoader:
                 # calibration the panel verdict is not a verdict: report it
                 # as unknown and keep the BW verdict.
                 if not panel_verdict_valid:
-                    import warnings
                     warnings.warn(
                         "panel=True without a panel calibration: the panel "
                         "score sums 8 terms while the default threshold is "

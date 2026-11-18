@@ -1,5 +1,22 @@
 # Spectral Hologram Distiller (SHD v3.15.2)
 
+> **2026-11-18 hunt findings D3 + W5 (shipped):** (D3) the uncalibrated COMBINED
+> radar (`check_domain_shift(mean_shift=True)`) summed BW + a mean-shift z-score
+> against the BW-only default constant --- the same mismatch the panel guard
+> fixed in v3.15.1, but the combined path was left unguarded: measured 26/30
+> healthy in-distribution windows false-alarmed. Without `calibrate_threshold_ms`
+> the combined verdict is now `combined_is_shifted=None` + a warning and
+> `is_shifted` keeps the BW verdict (probe FA 26/30 -> 0/30); a calibrated
+> combined radar is unchanged. (W5) `shd_watch` (the deployment CLI) only ever
+> scored the BW-only passport --- the detector that misses the MetroPT-3 leaks
+> (0/4) --- while the validated combined radar (4/4) lived only in the bench.
+> `calibrate`/`watch` now take `--radar {bw,combined,panel}`, the detector is
+> recorded in the threshold JSON and enforced on watch (changing it requires
+> recalibration); legacy v2 files default to bw. Published artifacts unaffected
+> (radar benches score AUC over distances; MetroPT calibrates via the budget
+> protocol). Regressions in `tests/test_bughunt_2026_11_18.py`. Suite 281 -> 285,
+> gate 586.
+
 > **2026-11-18 hunt finding Y2 (shipped):** `HologramCrystalLoader.save()` dropped
 > the finding-Y temporal dx statistics (`dx_mean`/`dx_std`) and the finding-U band
 > keys (`auto_band_ratio`/`effective_band_ratio`), so `heal -> save -> reload`
@@ -11,8 +28,8 @@
 > `save_hologram()` path and every published artifact are untouched; `shd_watch.py`
 > only calls `save_hologram`. Regression: `tests/test_bughunt_2026_11_18.py`
 > (4 tests). Suite 277 -> 281, gate 586. Also synced the `ARTIFACTS.md` Scania
-> tuned-C row to the 20-seed artifact (873.0/983.5/941.0; was the superseded
-> 10-seed 840.5/993.0/914.0).
+> tuned-C row to the 20-seed artifact (873.0/983.5/941.0), replacing the
+> superseded 10-seed predecessor.
 
 > **2026-11-15 state:** claim gate **586 checks**, suite **277 tests**, 0 failures.
 > A second suppressor hunt (first-batch X normalization, reservoir count bias,
